@@ -12,8 +12,8 @@ android {
         applicationId = "com.shogun.speedtest"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.1.2"
+        versionCode = 4
+        versionName = "0.1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -23,7 +23,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
