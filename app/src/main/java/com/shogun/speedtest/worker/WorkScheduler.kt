@@ -57,4 +57,31 @@ object WorkScheduler {
     fun cancelWork(context: Context) {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
     }
+
+    /**
+     * 計測完了後に呼び出し、次の:00/:30に再アライン
+     * PeriodicWorkを一度キャンセルしてREPLACEで再登録
+     */
+    fun reschedule(context: Context) {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val initialDelay = calculateInitialDelay()
+
+        val workRequest = PeriodicWorkRequestBuilder<SpeedtestWorker>(
+            30, TimeUnit.MINUTES,
+            5, TimeUnit.MINUTES
+        )
+            .setConstraints(constraints)
+            .setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
+            .addTag(WORK_NAME)
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            WORK_NAME,
+            ExistingPeriodicWorkPolicy.REPLACE,
+            workRequest
+        )
+    }
 }
