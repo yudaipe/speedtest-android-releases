@@ -18,8 +18,7 @@ class UpdateChecker(private val context: Context) {
     private val client = OkHttpClient()
 
     companion object {
-        // Google Drive の version.json URL（FILE_ID部分は後で差し替え）
-        const val VERSION_JSON_URL = "https://drive.google.com/uc?export=download&id=1pP44PwqBCwoc457UMUNfUHGFA3AcshKh"
+        const val VERSION_JSON_URL = "https://github.com/yudaipe/speedtest-android-releases/releases/latest/download/version.json"
     }
 
     suspend fun checkForUpdate(): UpdateInfo? = withContext(Dispatchers.IO) {
