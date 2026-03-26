@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Speedtest Monitor</string>
+    <string name="btn_run_speedtest">手動実行</string>
+    <string name="result_placeholder">ここに結果が表示されます</string>
+</resources>
