@@ -1,6 +1,8 @@
 package com.shogun.speedtest
 
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.animation.core.*
 import com.shogun.speedtest.update.UpdateDownloader
 import androidx.compose.foundation.Canvas
@@ -51,6 +53,8 @@ fun MainScreen(viewModel: MainViewModel) {
     val gaugeValue by viewModel.gaugeValue.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val updateInfo by viewModel.updateInfo.collectAsState()
+    val locationMissing by viewModel.locationPermissionMissing.collectAsState()
+    val notificationMissing by viewModel.notificationPermissionMissing.collectAsState()
 
     val animatedGauge by animateFloatAsState(
         targetValue = gaugeValue,
@@ -91,6 +95,45 @@ fun MainScreen(viewModel: MainViewModel) {
                 context.startActivity(Intent(context, SettingsActivity::class.java))
             }) {
                 Text("⚙", fontSize = 20.sp, color = TextSecondary)
+            }
+        }
+
+        // Permission warning banners
+        if (locationMissing || notificationMissing) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF4A1A1A))
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                    if (locationMissing) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "⚠ 位置情報の権限がないためSSIDを取得できません",
+                                color = Color(0xFFFF8A80),
+                                fontSize = 11.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    if (notificationMissing) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "⚠ 通知の権限がないため自動計測が停止する場合があります",
+                                color = Color(0xFFFF8A80),
+                                fontSize = 11.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    TextButton(onClick = {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", context.packageName, null)
+                        }
+                        context.startActivity(intent)
+                    }) {
+                        Text("権限を設定する", color = AccentYellow, fontSize = 11.sp)
+                    }
+                }
             }
         }
 

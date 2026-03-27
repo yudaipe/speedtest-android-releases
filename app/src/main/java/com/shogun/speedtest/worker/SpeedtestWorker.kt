@@ -90,7 +90,6 @@ class SpeedtestWorker(
             // 5. Google Forms送信（未同期分まとめて）
             syncToForms(db)
 
-            WorkScheduler.reschedule(applicationContext)
             Result.success()
         } catch (e: SpeedtestExecutionException) {
             Log.w(TAG, "CLI execution failed, will retry: ${e.message}")

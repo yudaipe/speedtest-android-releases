@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.shogun.speedtest.data.SpeedtestDatabase
@@ -15,6 +16,7 @@ import com.shogun.speedtest.worker.SpeedtestWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -29,6 +31,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val realtimePoints = MutableStateFlow<List<Float>>(emptyList())
     val gaugeValue = MutableStateFlow(0f)
     val errorMessage = MutableStateFlow<String?>(null)
+    val locationPermissionMissing = MutableStateFlow(false)
+    val notificationPermissionMissing = MutableStateFlow(false)
 
     private val _updateInfo = MutableStateFlow<UpdateInfo?>(null)
     val updateInfo: StateFlow<UpdateInfo?> = _updateInfo
@@ -36,7 +40,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val deviceName: String get() = settingsRepo.getDeviceName()
 
     init {
-        loadHistory()
+        viewModelScope.launch {
+            dao.getRecentFlow().collectLatest { results ->
+                history.value = results
+                latestResult.value = results.firstOrNull()
+                results.firstOrNull()?.let { gaugeValue.value = it.downloadMbps.toFloat() }
+            }
+        }
     }
 
     fun loadHistory() {
@@ -69,12 +79,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         gaugeValue.value = 0f
         errorMessage.value = null
 
-        // Enqueue WorkManager
+        // Enqueue WorkManager (unique name prevents overlap with periodic work)
         val workRequest = OneTimeWorkRequestBuilder<SpeedtestWorker>()
             .addTag("speedtest_one_shot")
             .build()
         val workManager = WorkManager.getInstance(context)
-        workManager.enqueue(workRequest)
+        workManager.enqueueUniqueWork(
+            "speedtest_manual",
+            ExistingWorkPolicy.KEEP,
+            workRequest
+        )
 
         // Observe WorkManager completion
         viewModelScope.launch {

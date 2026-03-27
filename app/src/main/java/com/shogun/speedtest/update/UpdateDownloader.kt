@@ -14,7 +14,11 @@ import java.io.File
 
 class UpdateDownloader(private val context: Context) {
 
-    fun downloadApk(apkUrl: String, versionName: String) {
+    fun downloadApk(
+        apkUrl: String,
+        versionName: String,
+        onError: (String) -> Unit = {}
+    ): Long {
         val fileName = "speed_test_monitor-v$versionName.apk"
         val request = DownloadManager.Request(Uri.parse(apkUrl)).apply {
             setTitle("speed_test_monitor アップデート v$versionName")
@@ -32,7 +36,27 @@ class UpdateDownloader(private val context: Context) {
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                 if (id == downloadId) {
                     ctx.unregisterReceiver(this)
-                    installApk(ctx, fileName)
+                    val query = DownloadManager.Query().setFilterById(downloadId)
+                    val cursor = dm.query(query)
+                    cursor.use {
+                        if (it.moveToFirst()) {
+                            val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                            val reason = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
+                            when (status) {
+                                DownloadManager.STATUS_SUCCESSFUL -> installApk(ctx, fileName)
+                                DownloadManager.STATUS_FAILED -> {
+                                    val msg = when (reason) {
+                                        DownloadManager.ERROR_INSUFFICIENT_SPACE -> "ストレージ不足"
+                                        DownloadManager.ERROR_FILE_ALREADY_EXISTS -> "ファイルが既に存在します"
+                                        DownloadManager.ERROR_CANNOT_RESUME -> "ダウンロードを再開できません"
+                                        404 -> "ファイルが見つかりません（HTTP 404）"
+                                        else -> "ダウンロード失敗（エラー: $reason）"
+                                    }
+                                    onError(msg)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -40,6 +64,7 @@ class UpdateDownloader(private val context: Context) {
             receiver,
             IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
         )
+        return downloadId
     }
 
     private fun installApk(context: Context, fileName: String) {

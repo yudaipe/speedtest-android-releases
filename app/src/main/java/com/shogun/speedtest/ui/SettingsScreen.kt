@@ -1,23 +1,29 @@
 package com.shogun.speedtest.ui
 
+import android.app.DownloadManager
 import android.content.Context
 import android.os.PowerManager
 import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -31,6 +37,7 @@ import com.shogun.speedtest.update.UpdateChecker
 import com.shogun.speedtest.update.UpdateDownloader
 import com.shogun.speedtest.update.UpdateInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -116,7 +123,76 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
 
         var isChecking by remember { mutableStateOf(false) }
         var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+        var isDownloading by remember { mutableStateOf(false) }
+        var downloadProgress by remember { mutableFloatStateOf(0f) }
+        var activeDownloadId by remember { mutableLongStateOf(-1L) }
+        var downloadError by remember { mutableStateOf<String?>(null) }
         val scope = rememberCoroutineScope()
+        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+
+        // ダウンロード進捗ポーリング
+        LaunchedEffect(activeDownloadId) {
+            if (activeDownloadId < 0) return@LaunchedEffect
+            while (isDownloading) {
+                val query = DownloadManager.Query().setFilterById(activeDownloadId)
+                val cursor = dm.query(query)
+                cursor.use {
+                    if (it.moveToFirst()) {
+                        val downloaded = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                        val total = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                        if (total > 0) {
+                            downloadProgress = downloaded.toFloat() / total.toFloat()
+                        }
+                        val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                        if (status == DownloadManager.STATUS_SUCCESSFUL ||
+                            status == DownloadManager.STATUS_FAILED) {
+                            isDownloading = false
+                        }
+                    }
+                }
+                delay(500)
+            }
+        }
+
+        // ダウンロード進捗ダイアログ
+        if (isDownloading) {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("ダウンロード中...") },
+                text = {
+                    Column {
+                        Text("${(downloadProgress * 100).toInt()}%")
+                        LinearProgressIndicator(
+                            progress = { downloadProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp)
+                        )
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = {
+                        dm.remove(activeDownloadId)
+                        isDownloading = false
+                        activeDownloadId = -1L
+                        downloadProgress = 0f
+                    }) { Text("キャンセル") }
+                }
+            )
+        }
+
+        // エラーダイアログ
+        downloadError?.let { errMsg ->
+            AlertDialog(
+                onDismissRequest = { downloadError = null },
+                title = { Text("ダウンロードエラー") },
+                text = { Text(errMsg) },
+                confirmButton = {
+                    TextButton(onClick = { downloadError = null }) { Text("OK") }
+                }
+            )
+        }
 
         if (updateInfo != null) {
             AlertDialog(
@@ -125,8 +201,19 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                 text = { Text("v${updateInfo!!.versionName} が利用可能です") },
                 confirmButton = {
                     TextButton(onClick = {
-                        UpdateDownloader(context).downloadApk(updateInfo!!.apkUrl, updateInfo!!.versionName)
+                        val info = updateInfo!!
                         updateInfo = null
+                        isDownloading = true
+                        downloadProgress = 0f
+                        val id = UpdateDownloader(context).downloadApk(
+                            apkUrl = info.apkUrl,
+                            versionName = info.versionName,
+                            onError = { msg ->
+                                isDownloading = false
+                                downloadError = msg
+                            }
+                        )
+                        activeDownloadId = id
                     }) { Text("ダウンロード") }
                 },
                 dismissButton = {

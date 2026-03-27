@@ -1,6 +1,7 @@
 package com.shogun.speedtest
 
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
@@ -24,12 +25,21 @@ class MainActivity : ComponentActivity() {
         val granted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                       permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
         android.util.Log.d("MainActivity", "Location permission granted: $granted")
+        viewModel.locationPermissionMissing.value = !granted
+    }
+
+    private val notificationPermissionRequest = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        android.util.Log.d("MainActivity", "Notification permission granted: $granted")
+        viewModel.notificationPermissionMissing.value = !granted
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestBatteryOptimizationExemption()
         requestLocationPermissionIfNeeded()
+        requestNotificationPermissionIfNeeded()
         viewModel.checkForUpdate(this)
         setContent {
             MaterialTheme(
@@ -44,12 +54,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestLocationPermissionIfNeeded() {
-        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        val granted = ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) {
             locationPermissionRequest.launch(arrayOf(
                 android.Manifest.permission.ACCESS_FINE_LOCATION,
                 android.Manifest.permission.ACCESS_COARSE_LOCATION
             ))
+        }
+        viewModel.locationPermissionMissing.value = !granted
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notificationPermissionRequest.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+            viewModel.notificationPermissionMissing.value = !granted
         }
     }
 
