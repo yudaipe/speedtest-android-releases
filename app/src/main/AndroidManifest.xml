@@ -21,6 +21,7 @@
 
     <!-- GPS位置情報（FusedLocationProvider） -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- Wifi SSID取得（Android 8+でACCESS_FINE_LOCATIONも必要） -->
