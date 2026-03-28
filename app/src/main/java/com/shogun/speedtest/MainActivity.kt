@@ -26,6 +26,9 @@ class MainActivity : ComponentActivity() {
                       permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
         android.util.Log.d("MainActivity", "Location permission granted: $granted")
         viewModel.locationPermissionMissing.value = !granted
+        if (granted) {
+            requestBackgroundLocationIfNeeded()
+        }
     }
 
     private val notificationPermissionRequest = registerForActivityResult(
@@ -61,8 +64,32 @@ class MainActivity : ComponentActivity() {
                 android.Manifest.permission.ACCESS_FINE_LOCATION,
                 android.Manifest.permission.ACCESS_COARSE_LOCATION
             ))
+        } else {
+            requestBackgroundLocationIfNeeded()
         }
         viewModel.locationPermissionMissing.value = !granted
+    }
+
+    private fun requestBackgroundLocationIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val bgGranted = ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (bgGranted) return
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Wi-Fi名の記録について")
+            .setMessage("バックグラウンドでWi-Fi名（SSID）を記録するには、位置情報を「常に許可」に設定してください。\n\n設定 > 権限 > 位置情報 > 「常に許可」を選択してください。")
+            .setPositiveButton("設定を開く") { _, _ ->
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            }
+            .setNegativeButton("後で") { dialog, _ ->
+                dialog.dismiss()
+            }
+            .show()
     }
 
     private fun requestNotificationPermissionIfNeeded() {
