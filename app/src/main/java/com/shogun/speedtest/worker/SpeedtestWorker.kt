@@ -18,7 +18,7 @@ import com.shogun.speedtest.data.SpeedtestResult
 import com.shogun.speedtest.device.DeviceIdentifier
 import com.shogun.speedtest.location.GpsLocationProvider
 import com.shogun.speedtest.settings.SettingsRepository
-import com.shogun.speedtest.sheets.FormsClient
+import com.shogun.speedtest.supabase.SupabaseClient
 import com.shogun.speedtest.WifiSsidProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -87,8 +87,8 @@ class SpeedtestWorker(
             )
             db.speedtestDao().insert(entity)
 
-            // 5. Google Forms送信（未同期分まとめて）
-            syncToForms(db)
+            // 5. Supabase送信（未同期分まとめて）
+            syncToSupabase(db)
 
             Result.success()
         } catch (e: SpeedtestExecutionException) {
@@ -100,56 +100,51 @@ class SpeedtestWorker(
         }
     }
 
-    private suspend fun syncToForms(db: SpeedtestDatabase) {
+    private suspend fun syncToSupabase(db: SpeedtestDatabase) {
         val settings = SettingsRepository(applicationContext)
-        val formUrl = settings.getFormUrl()
-        if (formUrl.isBlank()) {
-            Log.w(TAG, "form_url not set, skipping Forms sync")
-            return
-        }
+        val deviceId = DeviceIdentifier.getId(applicationContext)
+        val deviceName = settings.getDeviceName()
+        val appVersion = try {
+            applicationContext.packageManager.getPackageInfo(applicationContext.packageName, 0).versionName ?: "unknown"
+        } catch (e: Exception) { "unknown" }
+        val wifiSsid = WifiSsidProvider.getSsid(applicationContext)
 
         try {
-            val client = FormsClient(formUrl)
-            val deviceId = DeviceIdentifier.getId(applicationContext)
-            val deviceName = settings.getDeviceName()
-            val appVersion = try {
-                applicationContext.packageManager.getPackageInfo(applicationContext.packageName, 0).versionName ?: "unknown"
-            } catch (e: Exception) { "unknown" }
-            val wifiSsid = WifiSsidProvider.getSsid(applicationContext)
-
+            val client = SupabaseClient()
             val unsynced = db.speedtestDao().getUnsynced()
             for (result in unsynced) {
-                val entryValues = mapOf(
-                    settings.getEntryTimestamp() to result.timestampIso,
-                    settings.getEntryDeviceId() to deviceId,
-                    settings.getEntryDeviceName() to deviceName,
-                    settings.getEntryDownload() to result.downloadMbps.toString(),
-                    settings.getEntryUpload() to result.uploadMbps.toString(),
-                    settings.getEntryPing() to result.pingMs.toString(),
-                    settings.getEntryJitter() to result.jitterMs.toString(),
-                    settings.getEntryIsp() to (result.isp ?: ""),
-                    settings.getEntryServerName() to (result.serverName ?: ""),
-                    settings.getEntryServerId() to result.serverId.toString(),
-                    settings.getEntryLat() to (result.lat?.toString() ?: ""),
-                    settings.getEntryLon() to (result.lon?.toString() ?: ""),
-                    settings.getEntryPacketLoss() to result.packetLoss.toString(),
-                    settings.getEntryServerCountry() to (result.serverCountry ?: ""),
-                    settings.getEntryDistanceKm() to (result.distanceKm?.toString() ?: ""),
-                    settings.getEntryResultUrl() to (result.resultUrl ?: ""),
-                    settings.getEntryExternalIp() to (result.externalIp ?: ""),
-                    settings.getEntrySoftwareVersion() to appVersion,
-                    settings.getEntryWifiSsid() to wifiSsid
-                ).filter { it.key.isNotBlank() }  // 未設定entryをスキップ
+                val payload: Map<String, Any?> = mapOf(
+                    "timestamp" to result.timestampIso,
+                    "device_id" to deviceId,
+                    "device_name" to deviceName,
+                    "app_type" to "android",
+                    "download_mbps" to result.downloadMbps,
+                    "upload_mbps" to result.uploadMbps,
+                    "ping_ms" to result.pingMs,
+                    "jitter_ms" to result.jitterMs,
+                    "packet_loss" to result.packetLoss,
+                    "isp" to result.isp,
+                    "server_name" to result.serverName,
+                    "server_id" to result.serverId,
+                    "server_country" to result.serverCountry,
+                    "lat" to result.lat,
+                    "lon" to result.lon,
+                    "distance_km" to result.distanceKm,
+                    "result_url" to result.resultUrl,
+                    "external_ip" to result.externalIp,
+                    "software_version" to appVersion,
+                    "wifi_ssid" to wifiSsid
+                )
 
-                if (client.postResult(entryValues)) {
+                if (client.postResult(payload)) {
                     db.speedtestDao().markAsSynced(result.id)
-                    Log.i(TAG, "Synced result id=${result.id} to Forms")
+                    Log.i(TAG, "Synced result id=${result.id} to Supabase")
                 } else {
-                    Log.w(TAG, "Failed to sync result id=${result.id}, will retry next time")
+                    Log.w(TAG, "Failed to sync result id=${result.id} to Supabase, will retry next time")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "syncToForms error: ${e.message}")
+            Log.e(TAG, "syncToSupabase error: ${e.message}")
         }
     }
 
