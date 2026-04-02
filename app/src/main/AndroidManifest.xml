@@ -5,6 +5,7 @@
     <!-- ネットワーク（InfluxDB送信） -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
     <!-- ForegroundService（Doze回避） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

@@ -38,10 +38,17 @@ class MainActivity : ComponentActivity() {
         viewModel.notificationPermissionMissing.value = !granted
     }
 
+    private val phoneStatePermissionRequest = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        android.util.Log.d("MainActivity", "Phone state permission granted: $granted")
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestBatteryOptimizationExemption()
         requestLocationPermissionIfNeeded()
+        requestPhoneStatePermissionIfNeeded()
         requestNotificationPermissionIfNeeded()
         viewModel.checkForUpdate(this)
         setContent {
@@ -100,6 +107,14 @@ class MainActivity : ComponentActivity() {
                 notificationPermissionRequest.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
             viewModel.notificationPermissionMissing.value = !granted
+        }
+    }
+
+    private fun requestPhoneStatePermissionIfNeeded() {
+        val granted = ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_PHONE_STATE) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            phoneStatePermissionRequest.launch(android.Manifest.permission.READ_PHONE_STATE)
         }
     }
 

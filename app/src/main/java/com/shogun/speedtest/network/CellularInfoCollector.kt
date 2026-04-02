@@ -1,0 +1,524 @@
+package com.shogun.speedtest.network
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.telephony.CellIdentityLte
+import android.telephony.CellInfo
+import android.telephony.CellInfoLte
+import android.telephony.CellInfoNr
+import android.telephony.CellLocation
+import android.telephony.CellSignalStrengthLte
+import android.telephony.PhoneStateListener
+import android.telephony.ServiceState
+import android.telephony.SignalStrength
+import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
+import androidx.core.content.ContextCompat
+
+data class CellularInfo(
+    val rsrpDbm: Int? = null,
+    val rsrqDb: Int? = null,
+    val sinrDb: Int? = null,
+    val rssiDbm: Int? = null,
+    val pci: Int? = null,
+    val tac: Int? = null,
+    val earfcn: Int? = null,
+    val bandNumber: Int? = null,
+    val networkType: String? = null,
+    val carrierName: String? = null,
+    val isCarrierAggregation: Boolean? = null,
+    val caBandwidthMhz: Int? = null,
+    val caBandConfig: String? = null,
+    val nrState: String? = null,
+    val mcc: String? = null,
+    val mnc: String? = null,
+    val cqi: Int? = null,
+    val timingAdvance: Int? = null,
+    val visibleCellCount: Int? = null,
+    val handoverCount: Int? = null,
+    val endcAvailable: Boolean? = null,
+    val rsrpVariance: Double? = null
+)
+
+class CellularInfoCollector(private val context: Context) {
+
+    private val rsrpSamples = mutableListOf<Int>()
+    private var handoverCount = 0
+    private var firstCellLocationObserved = false
+    private var listener: PhoneStateListener? = null
+
+    fun startTracking() {
+        if (!hasReadPhoneStatePermission()) return
+        val telephonyManager = resolveTelephonyManager()
+        val phoneStateListener = object : PhoneStateListener() {
+            override fun onSignalStrengthsChanged(signalStrength: SignalStrength?) {
+                signalStrength ?: return
+                sampleRsrp(signalStrength, telephonyManager)
+            }
+
+            override fun onCellLocationChanged(location: CellLocation?) {
+                if (firstCellLocationObserved) {
+                    handoverCount += 1
+                } else {
+                    firstCellLocationObserved = true
+                }
+            }
+        }
+        listener = phoneStateListener
+        try {
+            @Suppress("DEPRECATION")
+            telephonyManager.listen(
+                phoneStateListener,
+                PhoneStateListener.LISTEN_SIGNAL_STRENGTHS or PhoneStateListener.LISTEN_CELL_LOCATION
+            )
+        } catch (_: Exception) {
+            listener = null
+        }
+        try {
+            telephonyManager.signalStrength?.let { sampleRsrp(it, telephonyManager) }
+        } catch (_: Exception) {
+        }
+    }
+
+    fun stopAndCollect(): CellularInfo {
+        val telephonyManager = resolveTelephonyManager()
+        listener?.let {
+            try {
+                @Suppress("DEPRECATION")
+                telephonyManager.listen(it, PhoneStateListener.LISTEN_NONE)
+            } catch (_: Exception) {
+            }
+        }
+        listener = null
+
+        return CellularInfo(
+            rsrpDbm = getRsrp(telephonyManager),
+            rsrqDb = getRsrq(telephonyManager),
+            sinrDb = getSinr(telephonyManager),
+            rssiDbm = getRssi(telephonyManager),
+            pci = getPci(telephonyManager),
+            tac = getTac(telephonyManager),
+            earfcn = getEarfcn(telephonyManager),
+            bandNumber = getBandNumber(telephonyManager),
+            networkType = getNetworkType(telephonyManager),
+            carrierName = telephonyManager.networkOperatorName?.takeIf { it.isNotBlank() },
+            isCarrierAggregation = getIsCarrierAggregation(telephonyManager),
+            caBandwidthMhz = getCaBandwidthMhz(telephonyManager),
+            caBandConfig = getCaBandConfig(telephonyManager),
+            nrState = getNrState(telephonyManager),
+            mcc = getMcc(telephonyManager),
+            mnc = getMnc(telephonyManager),
+            cqi = getCqi(telephonyManager),
+            timingAdvance = getTimingAdvance(telephonyManager),
+            visibleCellCount = getVisibleCellCount(telephonyManager),
+            handoverCount = handoverCount,
+            endcAvailable = getEndcAvailable(telephonyManager),
+            rsrpVariance = getRsrpVariance()
+        )
+    }
+
+    private fun hasReadPhoneStatePermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_PHONE_STATE
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun resolveTelephonyManager(): TelephonyManager {
+        val baseManager = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+        if (!hasReadPhoneStatePermission() || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return baseManager
+        }
+
+        return try {
+            val dataSubId = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> SubscriptionManager.getActiveDataSubscriptionId()
+                else -> SubscriptionManager.getDefaultDataSubscriptionId()
+            }
+            if (dataSubId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+                baseManager.createForSubscriptionId(dataSubId)
+            } else {
+                baseManager
+            }
+        } catch (_: Throwable) {
+            baseManager
+        }
+    }
+
+    private fun sampleRsrp(signalStrength: SignalStrength, telephonyManager: TelephonyManager) {
+        getRsrpFromSignalStrength(signalStrength) ?: getRsrpFromCells(telephonyManager)
+            ?.let { rsrpSamples.add(it) }
+    }
+
+    private fun getRsrpVariance(): Double? {
+        if (rsrpSamples.size < 2) return null
+        val mean = rsrpSamples.average()
+        return rsrpSamples.map { sample ->
+            val diff = sample - mean
+            diff * diff
+        }.average()
+    }
+
+    private fun getNetworkType(telephonyManager: TelephonyManager): String? {
+        return try {
+            when (telephonyManager.dataNetworkType) {
+                TelephonyManager.NETWORK_TYPE_NR -> "NR"
+                TelephonyManager.NETWORK_TYPE_LTE -> "LTE"
+                TelephonyManager.NETWORK_TYPE_HSPAP -> "HSPAP"
+                TelephonyManager.NETWORK_TYPE_HSPA -> "HSPA"
+                TelephonyManager.NETWORK_TYPE_EDGE -> "EDGE"
+                TelephonyManager.NETWORK_TYPE_GPRS -> "GPRS"
+                TelephonyManager.NETWORK_TYPE_UNKNOWN -> "UNKNOWN"
+                else -> telephonyManager.dataNetworkType.toString()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getIsCarrierAggregation(telephonyManager: TelephonyManager): Boolean? {
+        val bands = getCaBandConfig(telephonyManager)
+        if (!bands.isNullOrBlank() && bands.contains("+")) return true
+        val bandwidth = getCaBandwidthMhz(telephonyManager)
+        return bandwidth?.let { it > 20 }
+    }
+
+    private fun getTimingAdvance(telephonyManager: TelephonyManager): Int? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getPrimaryLteCell(telephonyManager)
+                    ?.cellSignalStrength
+                    ?.timingAdvance
+                    ?.takeIf { it != Int.MAX_VALUE && it >= 0 }
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getVisibleCellCount(telephonyManager: TelephonyManager): Int? {
+        return try {
+            getAllCellInfo(telephonyManager)?.size
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getEndcAvailable(telephonyManager: TelephonyManager): Boolean? {
+        return try {
+            val serviceState = telephonyManager.serviceState ?: return null
+            val method = ServiceState::class.java.methods.firstOrNull { it.name == "isNrAvailable" } ?: return null
+            method.invoke(serviceState) as? Boolean
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getRsrp(telephonyManager: TelephonyManager): Int? {
+        return try {
+            telephonyManager.signalStrength?.let { getRsrpFromSignalStrength(it) } ?: getRsrpFromCells(telephonyManager)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getRsrq(telephonyManager: TelephonyManager): Int? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                telephonyManager.signalStrength
+                    ?.cellSignalStrengths
+                    ?.filterIsInstance<CellSignalStrengthLte>()
+                    ?.firstOrNull()
+                    ?.rsrq
+                    ?.takeIf { it != Int.MAX_VALUE }
+            } else {
+                getPrimaryLteCell(telephonyManager)?.cellSignalStrength?.rsrq?.takeIf { it != Int.MAX_VALUE && it != Int.MIN_VALUE }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getSinr(telephonyManager: TelephonyManager): Int? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                telephonyManager.signalStrength
+                    ?.cellSignalStrengths
+                    ?.filterIsInstance<CellSignalStrengthLte>()
+                    ?.firstOrNull()
+                    ?.rssnr
+                    ?.takeIf { it != Int.MAX_VALUE }
+            } else {
+                getPrimaryLteCell(telephonyManager)?.cellSignalStrength?.rssnr?.takeIf { it != Int.MAX_VALUE && it != Int.MIN_VALUE }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getRssi(telephonyManager: TelephonyManager): Int? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                telephonyManager.signalStrength
+                    ?.cellSignalStrengths
+                    ?.filterIsInstance<CellSignalStrengthLte>()
+                    ?.firstOrNull()
+                    ?.rssi
+                    ?.takeIf { it != Int.MAX_VALUE }
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getCqi(telephonyManager: TelephonyManager): Int? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                telephonyManager.signalStrength
+                    ?.cellSignalStrengths
+                    ?.filterIsInstance<CellSignalStrengthLte>()
+                    ?.firstOrNull()
+                    ?.cqi
+                    ?.takeIf { it in 0..15 }
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getPci(telephonyManager: TelephonyManager): Int? {
+        return try {
+            getPrimaryLteCell(telephonyManager)
+                ?.cellIdentity
+                ?.pci
+                ?.takeIf { it != Int.MAX_VALUE }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getTac(telephonyManager: TelephonyManager): Int? {
+        return try {
+            getPrimaryLteCell(telephonyManager)
+                ?.cellIdentity
+                ?.tac
+                ?.takeIf { it != Int.MAX_VALUE }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getEarfcn(telephonyManager: TelephonyManager): Int? {
+        return try {
+            val lte = getPrimaryLteCell(telephonyManager)
+            if (lte != null) {
+                lte.cellIdentity.earfcn.takeIf { it > 0 && it != Int.MAX_VALUE }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                getPrimaryNrCell(telephonyManager)
+                    ?.cellIdentity
+                    ?.let { getIntViaReflection(it, "getNrarfcn") }
+                    ?.takeIf { it > 0 && it != Int.MAX_VALUE }
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getBandNumber(telephonyManager: TelephonyManager): Int? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                getPrimaryLteCell(telephonyManager)
+                    ?.cellIdentity
+                    ?.let { getBandsViaReflection(it)?.firstOrNull() }
+                    ?: getPrimaryNrCell(telephonyManager)
+                        ?.cellIdentity
+                        ?.let { getBandsViaReflection(it)?.firstOrNull() }
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getCaBandwidthMhz(telephonyManager: TelephonyManager): Int? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                @Suppress("DEPRECATION")
+                telephonyManager.serviceState?.cellBandwidths
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.sum()
+                    ?.div(1000)
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getCaBandConfig(telephonyManager: TelephonyManager): String? {
+        return try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+            val parts = mutableListOf<String>()
+            getAllCellInfo(telephonyManager)?.forEach { cell ->
+                val isServing = cell.cellConnectionStatus == CellInfo.CONNECTION_PRIMARY_SERVING ||
+                    cell.cellConnectionStatus == CellInfo.CONNECTION_SECONDARY_SERVING
+                if (!isServing) return@forEach
+                val entry = when {
+                    cell is CellInfoLte -> {
+                        val identity = cell.cellIdentity
+                        val band = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            getBandsViaReflection(identity)?.firstOrNull()
+                        } else {
+                            null
+                        }
+                        val bandwidthMhz = identity.bandwidth
+                            .takeIf { it > 0 && it != Int.MAX_VALUE }
+                            ?.div(1000)
+                        when {
+                            band != null && bandwidthMhz != null -> "Band$band(${bandwidthMhz}MHz)"
+                            band != null -> "Band$band"
+                            else -> null
+                        }
+                    }
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && cell is CellInfoNr -> {
+                        val band = getBandsViaReflection(cell.cellIdentity)?.firstOrNull()
+                        band?.let { "NR-Band$it" }
+                    }
+                    else -> null
+                }
+                if (!entry.isNullOrBlank() && !parts.contains(entry)) {
+                    parts += entry
+                }
+            }
+            parts.takeIf { it.isNotEmpty() }?.joinToString("+")
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getNrState(telephonyManager: TelephonyManager): String? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val serviceState = telephonyManager.serviceState ?: return null
+                val method = ServiceState::class.java.getMethod("getNrState")
+                when (method.invoke(serviceState) as? Int) {
+                    0 -> "NONE"
+                    1 -> "RESTRICTED"
+                    2 -> "NOT_RESTRICTED"
+                    3 -> "CONNECTED"
+                    else -> null
+                }
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getMcc(telephonyManager: TelephonyManager): String? {
+        return try {
+            telephonyManager.networkOperator?.takeIf { it.length >= 3 }?.substring(0, 3)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getMnc(telephonyManager: TelephonyManager): String? {
+        return try {
+            telephonyManager.networkOperator?.takeIf { it.length >= 5 }?.substring(3)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getRsrpFromSignalStrength(signalStrength: SignalStrength): Int? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                signalStrength.cellSignalStrengths
+                    .filterIsInstance<CellSignalStrengthLte>()
+                    .firstOrNull()
+                    ?.rsrp
+                    ?.takeIf { it != Int.MAX_VALUE }
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getRsrpFromCells(telephonyManager: TelephonyManager): Int? {
+        return try {
+            getPrimaryLteCell(telephonyManager)
+                ?.cellSignalStrength
+                ?.rsrp
+                ?.takeIf { it != Int.MAX_VALUE && it != Int.MIN_VALUE }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun getAllCellInfo(telephonyManager: TelephonyManager): List<CellInfo>? {
+        return try {
+            telephonyManager.allCellInfo
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getPrimaryLteCell(telephonyManager: TelephonyManager): CellInfoLte? {
+        return getAllCellInfo(telephonyManager)
+            ?.filterIsInstance<CellInfoLte>()
+            ?.let { cells ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    cells.firstOrNull { it.cellConnectionStatus == CellInfo.CONNECTION_PRIMARY_SERVING }
+                        ?: cells.firstOrNull { it.isRegistered }
+                        ?: cells.firstOrNull()
+                } else {
+                    cells.firstOrNull { it.isRegistered } ?: cells.firstOrNull()
+                }
+            }
+    }
+
+    private fun getPrimaryNrCell(telephonyManager: TelephonyManager): CellInfoNr? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return getAllCellInfo(telephonyManager)
+            ?.filterIsInstance<CellInfoNr>()
+            ?.let { cells ->
+                cells.firstOrNull { it.isRegistered } ?: cells.firstOrNull()
+            }
+    }
+
+    private fun getBandsViaReflection(identity: Any): IntArray? {
+        return try {
+            val method = identity.javaClass.methods.firstOrNull { it.name == "getBands" } ?: return null
+            method.invoke(identity) as? IntArray
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getIntViaReflection(target: Any, methodName: String): Int? {
+        return try {
+            val method = target.javaClass.methods.firstOrNull { it.name == methodName } ?: return null
+            method.invoke(target) as? Int
+        } catch (_: Exception) {
+            null
+        }
+    }
+}

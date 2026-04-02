@@ -23,5 +23,35 @@ data class SpeedtestResult(
     val distanceKm: Double?,       // サーバーまでの距離(km)
     val resultUrl: String?,        // Speedtest結果URL
     val externalIp: String?,       // 外部IPアドレス
-    val isSynced: Boolean = false  // Google Sheetsへの同期済みフラグ
+    val isSynced: Boolean = false, // Supabaseへの同期済みフラグ
+    val wifiSsid: String? = null,
+    val connectionType: String? = null,
+    val rsrpDbm: Int? = null,
+    val rsrqDb: Int? = null,
+    val sinrDb: Int? = null,
+    val rssiDbm: Int? = null,
+    val pci: Int? = null,
+    val tac: Int? = null,
+    val earfcn: Int? = null,
+    val bandNumber: Int? = null,
+    val networkType: String? = null,
+    val carrierName: String? = null,
+    val isCarrierAggregation: Boolean? = null,
+    val caBandwidthMhz: Int? = null,
+    val caBandConfig: String? = null,
+    val nrState: String? = null,
+    val mcc: String? = null,
+    val mnc: String? = null,
+    val cqi: Int? = null,
+    val timingAdvance: Int? = null,
+    val visibleCellCount: Int? = null,
+    val handoverCount: Int? = null,
+    val endcAvailable: Boolean? = null,
+    val dnsResolveMs: Double? = null,
+    val ttfbMs: Double? = null,
+    val tcpConnectMs: Double? = null,
+    val rsrpVariance: Double? = null,
+    val ramUsagePercent: Double? = null,
+    val cpuUsagePercent: Double? = null,
+    val bgAppCount: Int? = null
 )

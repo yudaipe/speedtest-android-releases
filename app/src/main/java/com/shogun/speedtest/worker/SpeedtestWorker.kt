@@ -17,6 +17,11 @@ import com.shogun.speedtest.data.SpeedtestDatabase
 import com.shogun.speedtest.data.SpeedtestResult
 import com.shogun.speedtest.device.DeviceIdentifier
 import com.shogun.speedtest.location.GpsLocationProvider
+import com.shogun.speedtest.network.CellularInfoCollector
+import com.shogun.speedtest.network.DeviceMetricsCollector
+import com.shogun.speedtest.network.NetworkQualityProbe
+import com.shogun.speedtest.network.NetworkType
+import com.shogun.speedtest.network.NetworkTypeDetector
 import com.shogun.speedtest.settings.SettingsRepository
 import com.shogun.speedtest.supabase.SupabaseClient
 import com.shogun.speedtest.WifiSsidProvider
@@ -42,6 +47,12 @@ class SpeedtestWorker(
             // ForegroundService昇格（Doze中でも実行保証）
             setForeground(getForegroundInfo())
 
+            val networkType = NetworkTypeDetector(applicationContext).detect()
+            val cellularCollector = CellularInfoCollector(applicationContext)
+            cellularCollector.startTracking()
+            val networkProbe = NetworkQualityProbe()
+            val networkQuality = networkProbe.collect()
+
             // 1. GPS座標を取得（計測前に実施）
             val gpsProvider = GpsLocationProvider(applicationContext)
             val gpsLocation = gpsProvider.getCurrentLocation()
@@ -64,6 +75,13 @@ class SpeedtestWorker(
                 .ofPattern("yyyy-MM-dd HH:mm:ss")
                 .withZone(ZoneId.of("Asia/Tokyo"))
             val timestampJst = jstFormatter.format(Instant.now())
+            val wifiSsid = if (networkType == NetworkType.WIFI) {
+                WifiSsidProvider.getSsid(applicationContext).ifBlank { null }
+            } else {
+                null
+            }
+            val cellularInfo = cellularCollector.stopAndCollect()
+            val deviceMetrics = DeviceMetricsCollector(applicationContext).collect()
 
             val db = SpeedtestDatabase.getInstance(applicationContext)
             val entity = SpeedtestResult(
@@ -83,7 +101,37 @@ class SpeedtestWorker(
                 distanceKm = cliResult.distanceKm,
                 resultUrl = cliResult.resultUrl,
                 externalIp = cliResult.externalIp,
-                isSynced = false
+                isSynced = false,
+                wifiSsid = wifiSsid,
+                connectionType = networkType.wireValue,
+                rsrpDbm = cellularInfo.rsrpDbm,
+                rsrqDb = cellularInfo.rsrqDb,
+                sinrDb = cellularInfo.sinrDb,
+                rssiDbm = cellularInfo.rssiDbm,
+                pci = cellularInfo.pci,
+                tac = cellularInfo.tac,
+                earfcn = cellularInfo.earfcn,
+                bandNumber = cellularInfo.bandNumber,
+                networkType = cellularInfo.networkType,
+                carrierName = cellularInfo.carrierName,
+                isCarrierAggregation = cellularInfo.isCarrierAggregation,
+                caBandwidthMhz = cellularInfo.caBandwidthMhz,
+                caBandConfig = cellularInfo.caBandConfig,
+                nrState = cellularInfo.nrState,
+                mcc = cellularInfo.mcc,
+                mnc = cellularInfo.mnc,
+                cqi = cellularInfo.cqi,
+                timingAdvance = cellularInfo.timingAdvance,
+                visibleCellCount = cellularInfo.visibleCellCount,
+                handoverCount = cellularInfo.handoverCount,
+                endcAvailable = cellularInfo.endcAvailable,
+                dnsResolveMs = networkQuality.dnsResolveMs,
+                ttfbMs = networkQuality.ttfbMs,
+                tcpConnectMs = networkQuality.tcpConnectMs,
+                rsrpVariance = cellularInfo.rsrpVariance,
+                ramUsagePercent = deviceMetrics.ramUsagePercent,
+                cpuUsagePercent = deviceMetrics.cpuUsagePercent,
+                bgAppCount = deviceMetrics.bgAppCount
             )
             db.speedtestDao().insert(entity)
 
@@ -107,8 +155,6 @@ class SpeedtestWorker(
         val appVersion = try {
             applicationContext.packageManager.getPackageInfo(applicationContext.packageName, 0).versionName ?: "unknown"
         } catch (e: Exception) { "unknown" }
-        val wifiSsid = WifiSsidProvider.getSsid(applicationContext)
-
         try {
             val client = SupabaseClient()
             val unsynced = db.speedtestDao().getUnsynced()
@@ -133,7 +179,36 @@ class SpeedtestWorker(
                     "result_url" to result.resultUrl,
                     "external_ip" to result.externalIp,
                     "software_version" to appVersion,
-                    "wifi_ssid" to wifiSsid
+                    "wifi_ssid" to result.wifiSsid,
+                    "connection_type" to result.connectionType,
+                    "rsrp_dbm" to result.rsrpDbm,
+                    "rsrq_db" to result.rsrqDb,
+                    "sinr_db" to result.sinrDb,
+                    "rssi_dbm" to result.rssiDbm,
+                    "pci" to result.pci,
+                    "tac" to result.tac,
+                    "earfcn" to result.earfcn,
+                    "band_number" to result.bandNumber,
+                    "network_type" to result.networkType,
+                    "carrier_name" to result.carrierName,
+                    "is_carrier_aggregation" to result.isCarrierAggregation,
+                    "ca_bandwidth_mhz" to result.caBandwidthMhz,
+                    "ca_band_config" to result.caBandConfig,
+                    "nr_state" to result.nrState,
+                    "mcc" to result.mcc,
+                    "mnc" to result.mnc,
+                    "cqi" to result.cqi,
+                    "timing_advance" to result.timingAdvance,
+                    "visible_cell_count" to result.visibleCellCount,
+                    "handover_count" to result.handoverCount,
+                    "endc_available" to result.endcAvailable,
+                    "dns_resolve_ms" to result.dnsResolveMs,
+                    "ttfb_ms" to result.ttfbMs,
+                    "tcp_connect_ms" to result.tcpConnectMs,
+                    "rsrp_variance" to result.rsrpVariance,
+                    "ram_usage_percent" to result.ramUsagePercent,
+                    "cpu_usage_percent" to result.cpuUsagePercent,
+                    "bg_app_count" to result.bgAppCount
                 )
 
                 if (client.postResult(payload)) {
