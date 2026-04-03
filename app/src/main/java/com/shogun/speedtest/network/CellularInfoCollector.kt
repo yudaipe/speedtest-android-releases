@@ -15,8 +15,11 @@ import android.telephony.PhoneStateListener
 import android.telephony.ServiceState
 import android.telephony.SignalStrength
 import android.telephony.SubscriptionManager
+import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
+import androidx.core.content.ContextCompat.getMainExecutor
+import java.util.Collections
 
 data class CellularInfo(
     val rsrpDbm: Int? = null,
@@ -45,37 +48,49 @@ data class CellularInfo(
 
 class CellularInfoCollector(private val context: Context) {
 
-    private val rsrpSamples = mutableListOf<Int>()
+    private val rsrpSamples = Collections.synchronizedList(mutableListOf<Int>())
     private var handoverCount = 0
     private var firstCellLocationObserved = false
     private var listener: PhoneStateListener? = null
+    private var telephonyCallback: TrackingTelephonyCallback? = null
+    private var lastServingCellKey: String? = null
 
     fun startTracking() {
         if (!hasReadPhoneStatePermission()) return
         val telephonyManager = resolveTelephonyManager()
-        val phoneStateListener = object : PhoneStateListener() {
-            override fun onSignalStrengthsChanged(signalStrength: SignalStrength?) {
-                signalStrength ?: return
-                sampleRsrp(signalStrength, telephonyManager)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val callback = TrackingTelephonyCallback(telephonyManager)
+            telephonyCallback = callback
+            try {
+                telephonyManager.registerTelephonyCallback(getMainExecutor(context), callback)
+            } catch (_: Exception) {
+                telephonyCallback = null
             }
+        } else {
+            val phoneStateListener = object : PhoneStateListener() {
+                override fun onSignalStrengthsChanged(signalStrength: SignalStrength?) {
+                    signalStrength ?: return
+                    sampleRsrp(signalStrength, telephonyManager)
+                }
 
-            override fun onCellLocationChanged(location: CellLocation?) {
-                if (firstCellLocationObserved) {
-                    handoverCount += 1
-                } else {
-                    firstCellLocationObserved = true
+                override fun onCellLocationChanged(location: CellLocation?) {
+                    if (firstCellLocationObserved) {
+                        handoverCount += 1
+                    } else {
+                        firstCellLocationObserved = true
+                    }
                 }
             }
-        }
-        listener = phoneStateListener
-        try {
-            @Suppress("DEPRECATION")
-            telephonyManager.listen(
-                phoneStateListener,
-                PhoneStateListener.LISTEN_SIGNAL_STRENGTHS or PhoneStateListener.LISTEN_CELL_LOCATION
-            )
-        } catch (_: Exception) {
-            listener = null
+            listener = phoneStateListener
+            try {
+                @Suppress("DEPRECATION")
+                telephonyManager.listen(
+                    phoneStateListener,
+                    PhoneStateListener.LISTEN_SIGNAL_STRENGTHS or PhoneStateListener.LISTEN_CELL_LOCATION
+                )
+            } catch (_: Exception) {
+                listener = null
+            }
         }
         try {
             telephonyManager.signalStrength?.let { sampleRsrp(it, telephonyManager) }
@@ -92,7 +107,14 @@ class CellularInfoCollector(private val context: Context) {
             } catch (_: Exception) {
             }
         }
+        telephonyCallback?.let {
+            try {
+                telephonyManager.unregisterTelephonyCallback(it)
+            } catch (_: Exception) {
+            }
+        }
         listener = null
+        telephonyCallback = null
 
         return CellularInfo(
             rsrpDbm = getRsrp(telephonyManager),
@@ -149,14 +171,15 @@ class CellularInfoCollector(private val context: Context) {
     }
 
     private fun sampleRsrp(signalStrength: SignalStrength, telephonyManager: TelephonyManager) {
-        getRsrpFromSignalStrength(signalStrength) ?: getRsrpFromCells(telephonyManager)
+        (getRsrpFromSignalStrength(signalStrength) ?: getRsrpFromCells(telephonyManager))
             ?.let { rsrpSamples.add(it) }
     }
 
     private fun getRsrpVariance(): Double? {
-        if (rsrpSamples.size < 2) return null
-        val mean = rsrpSamples.average()
-        return rsrpSamples.map { sample ->
+        val samples = synchronized(rsrpSamples) { rsrpSamples.toList() }
+        if (samples.size < 2) return null
+        val mean = samples.average()
+        return samples.map { sample ->
             val diff = sample - mean
             diff * diff
         }.average()
@@ -474,6 +497,7 @@ class CellularInfoCollector(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun getAllCellInfo(telephonyManager: TelephonyManager): List<CellInfo>? {
+        if (!hasFineLocationPermission()) return null
         return try {
             telephonyManager.allCellInfo
         } catch (_: Exception) {
@@ -519,6 +543,44 @@ class CellularInfoCollector(private val context: Context) {
             method.invoke(target) as? Int
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private fun hasFineLocationPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun updateServingCellState(cells: List<CellInfo>?) {
+        val servingKey = cells
+            ?.firstOrNull { it.isRegistered }
+            ?.cellIdentity
+            ?.toString()
+            ?: return
+        if (lastServingCellKey == null) {
+            lastServingCellKey = servingKey
+            return
+        }
+        if (lastServingCellKey != servingKey) {
+            handoverCount += 1
+            lastServingCellKey = servingKey
+        }
+    }
+
+    private inner class TrackingTelephonyCallback(
+        private val telephonyManager: TelephonyManager
+    ) : TelephonyCallback(),
+        TelephonyCallback.SignalStrengthsListener,
+        TelephonyCallback.CellInfoListener {
+
+        override fun onSignalStrengthsChanged(signalStrength: SignalStrength) {
+            sampleRsrp(signalStrength, telephonyManager)
+        }
+
+        override fun onCellInfoChanged(cellInfo: MutableList<CellInfo>) {
+            updateServingCellState(cellInfo)
         }
     }
 }

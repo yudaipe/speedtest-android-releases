@@ -49,7 +49,9 @@ class SpeedtestWorker(
 
             val networkType = NetworkTypeDetector(applicationContext).detect()
             val cellularCollector = CellularInfoCollector(applicationContext)
-            cellularCollector.startTracking()
+            withContext(Dispatchers.Main) {
+                cellularCollector.startTracking()
+            }
             val networkProbe = NetworkQualityProbe()
             val networkQuality = networkProbe.collect()
 

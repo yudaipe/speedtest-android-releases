@@ -1,5 +1,7 @@
 package com.shogun.speedtest.network
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -14,7 +16,7 @@ data class NetworkQualityMetrics(
 
 class NetworkQualityProbe {
 
-    fun collect(): NetworkQualityMetrics {
+    suspend fun collect(): NetworkQualityMetrics {
         return NetworkQualityMetrics(
             dnsResolveMs = measure("dns") { InetAddress.getByName("google.com") },
             ttfbMs = measure("ttfb") {
@@ -37,11 +39,13 @@ class NetworkQualityProbe {
         )
     }
 
-    private fun measure(label: String, block: () -> Unit): Double? {
+    private suspend fun measure(label: String, block: () -> Unit): Double? {
         return try {
-            val start = System.nanoTime()
-            block()
-            (System.nanoTime() - start) / 1_000_000.0
+            withContext(Dispatchers.IO) {
+                val start = System.nanoTime()
+                block()
+                (System.nanoTime() - start) / 1_000_000.0
+            }
         } catch (_: Exception) {
             null
         }
