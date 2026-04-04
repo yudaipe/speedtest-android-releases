@@ -27,6 +27,7 @@ class SupabaseClient {
     fun postResult(payload: Map<String, Any?>): Boolean {
         val json = JSONObject().apply {
             payload.forEach { (key, value) ->
+                // apn を含む追加メタデータは caller 側 payload をそのまま JSON 化する。
                 when (value) {
                     null -> put(key, JSONObject.NULL)
                     else -> put(key, value)

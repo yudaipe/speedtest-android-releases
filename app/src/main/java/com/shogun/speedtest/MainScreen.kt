@@ -2,7 +2,10 @@ package com.shogun.speedtest
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import com.shogun.speedtest.update.UpdateDownloader
 import androidx.compose.foundation.Canvas
@@ -44,7 +47,11 @@ private val TextPrimary = Color(0xFFFFFFFF)
 private val TextSecondary = Color(0xFF9E9E9E)
 
 @Composable
-fun MainScreen(viewModel: MainViewModel) {
+fun MainScreen(
+    viewModel: MainViewModel,
+    onRequestShizukuPermission: () -> Unit = {},
+    onOpenShizukuApp: () -> Unit = {}
+) {
     val context = LocalContext.current
     val isMeasuring by viewModel.isMeasuring.collectAsState()
     val latestResult by viewModel.latestResult.collectAsState()
@@ -55,12 +62,29 @@ fun MainScreen(viewModel: MainViewModel) {
     val updateInfo by viewModel.updateInfo.collectAsState()
     val locationMissing by viewModel.locationPermissionMissing.collectAsState()
     val notificationMissing by viewModel.notificationPermissionMissing.collectAsState()
+    val shizukuAvailable by viewModel.shizukuAvailable.collectAsState()
+    val shizukuPermissionGranted by viewModel.shizukuPermissionGranted.collectAsState()
 
     val animatedGauge by animateFloatAsState(
         targetValue = gaugeValue,
         animationSpec = tween(durationMillis = 400),
         label = "gauge"
     )
+
+    // OTA権限許可後の自動リトライ用
+    var pendingInstallFileName by remember { mutableStateOf<String?>(null) }
+    val installPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        // Settings から戻ってきたとき、権限が付与されていればリトライ
+        val fileName = pendingInstallFileName ?: return@rememberLauncherForActivityResult
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            context.packageManager.canRequestPackageInstalls()
+        ) {
+            pendingInstallFileName = null
+            UpdateDownloader(context).retryInstall(fileName)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -132,6 +156,41 @@ fun MainScreen(viewModel: MainViewModel) {
                         context.startActivity(intent)
                     }) {
                         Text("権限を設定する", color = AccentYellow, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        if (!shizukuAvailable || !shizukuPermissionGranted) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E3A5F))
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+                    Text(
+                        text = if (!shizukuAvailable) {
+                            "Shizuku未起動: 詳細バンド情報は利用不可"
+                        } else {
+                            "Shizuku権限未許可: 詳細バンド情報は利用不可"
+                        },
+                        color = Color(0xFFB3E5FC),
+                        fontSize = 11.sp,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        if (shizukuAvailable && !shizukuPermissionGranted) {
+                            TextButton(onClick = onRequestShizukuPermission) {
+                                Text("権限を許可", color = AccentYellow, fontSize = 11.sp)
+                            }
+                        }
+                        TextButton(onClick = onOpenShizukuApp) {
+                            Text("Shizukuを開く", color = AccentBlue, fontSize = 11.sp)
+                        }
                     }
                 }
             }
@@ -236,7 +295,15 @@ fun MainScreen(viewModel: MainViewModel) {
             text = { Text(info.releaseNotes.ifEmpty { "新しいバージョンが利用可能です" }) },
             confirmButton = {
                 TextButton(onClick = {
-                    val downloader = UpdateDownloader(context)
+                    val downloader = UpdateDownloader(context) { fileName ->
+                        // 権限未付与 → Settings を起動して戻り時に自動リトライ
+                        pendingInstallFileName = fileName
+                        val settingsIntent = Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:${context.packageName}")
+                        )
+                        installPermissionLauncher.launch(settingsIntent)
+                    }
                     downloader.downloadApk(info.apkUrl, info.versionName)
                     viewModel.dismissUpdate()
                 }) { Text("ダウンロード") }

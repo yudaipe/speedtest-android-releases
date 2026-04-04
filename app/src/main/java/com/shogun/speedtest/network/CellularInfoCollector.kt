@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Telephony
 import android.telephony.CellIdentityLte
 import android.telephony.CellInfo
 import android.telephony.CellInfoLte
@@ -19,6 +20,7 @@ import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
 import androidx.core.content.ContextCompat.getMainExecutor
+import com.google.gson.Gson
 import java.util.Collections
 
 data class CellularInfo(
@@ -32,6 +34,8 @@ data class CellularInfo(
     val bandNumber: Int? = null,
     val networkType: String? = null,
     val carrierName: String? = null,
+    val physicalCarrier: String? = null,
+    val apn: String? = null,
     val isCarrierAggregation: Boolean? = null,
     val caBandwidthMhz: Int? = null,
     val caBandConfig: String? = null,
@@ -43,11 +47,20 @@ data class CellularInfo(
     val visibleCellCount: Int? = null,
     val handoverCount: Int? = null,
     val endcAvailable: Boolean? = null,
-    val rsrpVariance: Double? = null
+    val rsrpVariance: Double? = null,
+    val bandNumberDirect: Int? = null,
+    val caComponentsJson: String? = null,
+    val nrType: String? = null,
+    val hiddenEndcAvailable: Boolean? = null,
+    val neighborCellsJson: String? = null,
+    val cellId: Long? = null,
+    val enbId: Long? = null
 )
 
 class CellularInfoCollector(private val context: Context) {
 
+    private val gson = Gson()
+    private val hiddenBandInfoProvider = HiddenBandInfoProvider(context)
     private val rsrpSamples = Collections.synchronizedList(mutableListOf<Int>())
     private var handoverCount = 0
     private var firstCellLocationObserved = false
@@ -100,6 +113,7 @@ class CellularInfoCollector(private val context: Context) {
 
     fun stopAndCollect(): CellularInfo {
         val telephonyManager = resolveTelephonyManager()
+        val hiddenBandInfo = hiddenBandInfoProvider.collect(telephonyManager)
         listener?.let {
             try {
                 @Suppress("DEPRECATION")
@@ -116,6 +130,9 @@ class CellularInfoCollector(private val context: Context) {
         listener = null
         telephonyCallback = null
 
+        val mcc = getMcc(telephonyManager)
+        val mnc = getMnc(telephonyManager)
+
         return CellularInfo(
             rsrpDbm = getRsrp(telephonyManager),
             rsrqDb = getRsrq(telephonyManager),
@@ -124,21 +141,50 @@ class CellularInfoCollector(private val context: Context) {
             pci = getPci(telephonyManager),
             tac = getTac(telephonyManager),
             earfcn = getEarfcn(telephonyManager),
-            bandNumber = getBandNumber(telephonyManager),
+            bandNumber = hiddenBandInfo.bandNumberDirect ?: getBandNumber(telephonyManager),
             networkType = getNetworkType(telephonyManager),
             carrierName = telephonyManager.networkOperatorName?.takeIf { it.isNotBlank() },
-            isCarrierAggregation = getIsCarrierAggregation(telephonyManager),
-            caBandwidthMhz = getCaBandwidthMhz(telephonyManager),
-            caBandConfig = getCaBandConfig(telephonyManager),
-            nrState = getNrState(telephonyManager),
-            mcc = getMcc(telephonyManager),
-            mnc = getMnc(telephonyManager),
+            physicalCarrier = if (mcc != null && mnc != null) {
+                PlmnCarrierMapper.getPhysicalCarrier(mcc, mnc)
+            } else {
+                null
+            },
+            apn = getApnName(telephonyManager),
+            isCarrierAggregation = hiddenBandInfo.caComponents?.let { it.size > 1 } ?: getIsCarrierAggregation(telephonyManager),
+            caBandwidthMhz = hiddenBandInfo.caComponents
+                ?.mapNotNull { it.bandwidthMhz }
+                ?.takeIf { it.isNotEmpty() }
+                ?.sum()
+                ?: getCaBandwidthMhz(telephonyManager),
+            caBandConfig = hiddenBandInfo.caComponents
+                ?.mapNotNull { component ->
+                    when {
+                        component.band != null && component.bandwidthMhz != null -> "Band${component.band}(${component.bandwidthMhz}MHz)"
+                        component.band != null -> "Band${component.band}"
+                        else -> null
+                    }
+                }
+                ?.distinct()
+                ?.takeIf { it.isNotEmpty() }
+                ?.joinToString("+")
+                ?: getCaBandConfig(telephonyManager),
+            nrState = hiddenBandInfo.nrType ?: getNrState(telephonyManager),
+            mcc = mcc,
+            mnc = mnc,
             cqi = getCqi(telephonyManager),
             timingAdvance = getTimingAdvance(telephonyManager),
-            visibleCellCount = getVisibleCellCount(telephonyManager),
+            visibleCellCount = hiddenBandInfo.neighborCells?.let { it.size + (hiddenBandInfo.caComponents?.size ?: 0) }
+                ?: getVisibleCellCount(telephonyManager),
             handoverCount = handoverCount,
-            endcAvailable = getEndcAvailable(telephonyManager),
-            rsrpVariance = getRsrpVariance()
+            endcAvailable = hiddenBandInfo.enDcAvailable ?: getEndcAvailable(telephonyManager),
+            rsrpVariance = getRsrpVariance(),
+            bandNumberDirect = hiddenBandInfo.bandNumberDirect,
+            caComponentsJson = hiddenBandInfo.caComponents?.let(gson::toJson),
+            nrType = hiddenBandInfo.nrType,
+            hiddenEndcAvailable = hiddenBandInfo.enDcAvailable,
+            neighborCellsJson = hiddenBandInfo.neighborCells?.let(gson::toJson),
+            cellId = hiddenBandInfo.cellId,
+            enbId = hiddenBandInfo.enbId
         )
     }
 
@@ -200,6 +246,37 @@ class CellularInfoCollector(private val context: Context) {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun getApnName(telephonyManager: TelephonyManager): String? {
+        val queriedApn = try {
+            val projection = arrayOf("apn")
+            context.contentResolver.query(
+                Telephony.Carriers.CONTENT_URI,
+                projection,
+                "current = ?",
+                arrayOf("1"),
+                null
+            )?.use { cursor ->
+                val apnIndex = cursor.getColumnIndex("apn")
+                while (cursor.moveToNext()) {
+                    if (apnIndex >= 0) {
+                        val value = cursor.getString(apnIndex)?.trim()
+                        if (!value.isNullOrBlank()) {
+                            return@use value
+                        }
+                    }
+                }
+                null
+            }
+        } catch (_: SecurityException) {
+            null
+        } catch (_: Exception) {
+            null
+        }
+
+        return queriedApn
+            ?: telephonyManager.networkOperatorName?.trim()?.takeIf { it.isNotBlank() }
     }
 
     private fun getIsCarrierAggregation(telephonyManager: TelephonyManager): Boolean? {

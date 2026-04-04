@@ -9,3 +9,16 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+
+# Secrets and credentials
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+credentials.json
+google-services.json.secret
+
+# CDR output files
+cdr_output/
+*.csv

@@ -33,9 +33,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val errorMessage = MutableStateFlow<String?>(null)
     val locationPermissionMissing = MutableStateFlow(false)
     val notificationPermissionMissing = MutableStateFlow(false)
+    val shizukuAvailable = MutableStateFlow(false)
+    val shizukuPermissionGranted = MutableStateFlow(false)
 
     private val _updateInfo = MutableStateFlow<UpdateInfo?>(null)
     val updateInfo: StateFlow<UpdateInfo?> = _updateInfo
+    private var dismissedVersionCode: Int = 0
 
     val deviceName: String get() = settingsRepo.getDeviceName()
 
@@ -62,14 +65,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val checker = UpdateChecker(context)
             val info = checker.checkForUpdate() ?: return@launch
-            if (info.versionCode > checker.getCurrentVersionCode()) {
+            if (info.versionCode > checker.getCurrentVersionCode() &&
+                info.versionCode != dismissedVersionCode) {
                 _updateInfo.value = info
             }
         }
     }
 
     fun dismissUpdate() {
+        dismissedVersionCode = _updateInfo.value?.versionCode ?: 0
         _updateInfo.value = null
+    }
+
+    fun updateShizukuState(available: Boolean, permissionGranted: Boolean) {
+        shizukuAvailable.value = available
+        shizukuPermissionGranted.value = permissionGranted
     }
 
     fun startMeasurement(context: Context) {

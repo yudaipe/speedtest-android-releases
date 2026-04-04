@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [SpeedtestResult::class],
-    version = 5,
+    version = 10,
     exportSchema = false
 )
 abstract class SpeedtestDatabase : RoomDatabase() {

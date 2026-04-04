@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.content.Intent
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,6 +19,11 @@ import androidx.core.content.ContextCompat
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private val shizukuInitializer by lazy {
+        ShizukuInitializer { available, permissionGranted ->
+            viewModel.updateShizukuState(available, permissionGranted)
+        }
+    }
 
     private val locationPermissionRequest = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -46,6 +52,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        shizukuInitializer.initialize()
         requestBatteryOptimizationExemption()
         requestLocationPermissionIfNeeded()
         requestPhoneStatePermissionIfNeeded()
@@ -58,9 +65,18 @@ class MainActivity : ComponentActivity() {
                     surface = Color(0xFF1A1A1A)
                 )
             ) {
-                MainScreen(viewModel = viewModel)
+                MainScreen(
+                    viewModel = viewModel,
+                    onRequestShizukuPermission = { shizukuInitializer.requestPermission() },
+                    onOpenShizukuApp = { openShizukuApp() }
+                )
             }
         }
+    }
+
+    override fun onDestroy() {
+        shizukuInitializer.dispose()
+        super.onDestroy()
     }
 
     private fun requestLocationPermissionIfNeeded() {
@@ -115,6 +131,15 @@ class MainActivity : ComponentActivity() {
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         if (!granted) {
             phoneStatePermissionRequest.launch(android.Manifest.permission.READ_PHONE_STATE)
+        }
+    }
+
+    private fun openShizukuApp() {
+        val intent = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+        if (intent != null) {
+            startActivity(intent)
+        } else {
+            Log.w("MainActivity", "Shizuku app is not installed")
         }
     }
 

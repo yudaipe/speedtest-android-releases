@@ -26,6 +26,9 @@ data class SpeedtestResult(
     val isSynced: Boolean = false, // Supabaseへの同期済みフラグ
     val wifiSsid: String? = null,
     val connectionType: String? = null,
+    val upstreamType: String? = null,
+    val upstreamSource: String? = null,
+    val upstreamConfidence: String? = null,
     val rsrpDbm: Int? = null,
     val rsrqDb: Int? = null,
     val sinrDb: Int? = null,
@@ -36,6 +39,8 @@ data class SpeedtestResult(
     val bandNumber: Int? = null,
     val networkType: String? = null,
     val carrierName: String? = null,
+    val physicalCarrier: String? = null,
+    val apn: String? = null,
     val isCarrierAggregation: Boolean? = null,
     val caBandwidthMhz: Int? = null,
     val caBandConfig: String? = null,
@@ -53,5 +58,12 @@ data class SpeedtestResult(
     val rsrpVariance: Double? = null,
     val ramUsagePercent: Double? = null,
     val cpuUsagePercent: Double? = null,
-    val bgAppCount: Int? = null
+    val bgAppCount: Int? = null,
+    val bandNumberDirect: Int? = null,
+    val caComponentsJson: String? = null,
+    val nrType: String? = null,
+    val hiddenEndcAvailable: Boolean? = null,
+    val neighborCellsJson: String? = null,
+    val cellId: Long? = null,
+    val enbId: Long? = null
 )

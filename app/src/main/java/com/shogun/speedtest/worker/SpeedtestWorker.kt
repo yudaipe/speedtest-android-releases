@@ -18,10 +18,12 @@ import com.shogun.speedtest.data.SpeedtestResult
 import com.shogun.speedtest.device.DeviceIdentifier
 import com.shogun.speedtest.location.GpsLocationProvider
 import com.shogun.speedtest.network.CellularInfoCollector
+import com.shogun.speedtest.network.AuxiliaryNetworkEstimator
 import com.shogun.speedtest.network.DeviceMetricsCollector
 import com.shogun.speedtest.network.NetworkQualityProbe
 import com.shogun.speedtest.network.NetworkType
 import com.shogun.speedtest.network.NetworkTypeDetector
+import com.shogun.speedtest.network.UpstreamDecisionEngine
 import com.shogun.speedtest.settings.SettingsRepository
 import com.shogun.speedtest.supabase.SupabaseClient
 import com.shogun.speedtest.WifiSsidProvider
@@ -82,6 +84,14 @@ class SpeedtestWorker(
             } else {
                 null
             }
+            val auxiliaryEstimate = AuxiliaryNetworkEstimator(applicationContext).estimateUpstreamType()
+            val upstreamDecision = UpstreamDecisionEngine().decide(
+                hasBeaconData = false,
+                bssidInDeviceConfig = false,
+                deviceConfigUpstreamType = null,
+                hasCdrMatch = false,
+                auxiliaryEstimate = auxiliaryEstimate
+            )
             val cellularInfo = cellularCollector.stopAndCollect()
             val deviceMetrics = DeviceMetricsCollector(applicationContext).collect()
 
@@ -106,6 +116,9 @@ class SpeedtestWorker(
                 isSynced = false,
                 wifiSsid = wifiSsid,
                 connectionType = networkType.wireValue,
+                upstreamType = upstreamDecision.upstreamType,
+                upstreamSource = upstreamDecision.upstreamSource,
+                upstreamConfidence = upstreamDecision.upstreamConfidence,
                 rsrpDbm = cellularInfo.rsrpDbm,
                 rsrqDb = cellularInfo.rsrqDb,
                 sinrDb = cellularInfo.sinrDb,
@@ -116,6 +129,8 @@ class SpeedtestWorker(
                 bandNumber = cellularInfo.bandNumber,
                 networkType = cellularInfo.networkType,
                 carrierName = cellularInfo.carrierName,
+                physicalCarrier = cellularInfo.physicalCarrier,
+                apn = cellularInfo.apn,
                 isCarrierAggregation = cellularInfo.isCarrierAggregation,
                 caBandwidthMhz = cellularInfo.caBandwidthMhz,
                 caBandConfig = cellularInfo.caBandConfig,
@@ -133,7 +148,14 @@ class SpeedtestWorker(
                 rsrpVariance = cellularInfo.rsrpVariance,
                 ramUsagePercent = deviceMetrics.ramUsagePercent,
                 cpuUsagePercent = deviceMetrics.cpuUsagePercent,
-                bgAppCount = deviceMetrics.bgAppCount
+                bgAppCount = deviceMetrics.bgAppCount,
+                bandNumberDirect = cellularInfo.bandNumberDirect,
+                caComponentsJson = cellularInfo.caComponentsJson,
+                nrType = cellularInfo.nrType,
+                hiddenEndcAvailable = cellularInfo.hiddenEndcAvailable,
+                neighborCellsJson = cellularInfo.neighborCellsJson,
+                cellId = cellularInfo.cellId,
+                enbId = cellularInfo.enbId
             )
             db.speedtestDao().insert(entity)
 
@@ -183,6 +205,9 @@ class SpeedtestWorker(
                     "software_version" to appVersion,
                     "wifi_ssid" to result.wifiSsid,
                     "connection_type" to result.connectionType,
+                    "upstream_type" to result.upstreamType,
+                    "upstream_source" to result.upstreamSource,
+                    "upstream_confidence" to result.upstreamConfidence,
                     "rsrp_dbm" to result.rsrpDbm,
                     "rsrq_db" to result.rsrqDb,
                     "sinr_db" to result.sinrDb,
@@ -193,6 +218,8 @@ class SpeedtestWorker(
                     "band_number" to result.bandNumber,
                     "network_type" to result.networkType,
                     "carrier_name" to result.carrierName,
+                    "physical_carrier" to result.physicalCarrier,
+                    "apn" to result.apn,
                     "is_carrier_aggregation" to result.isCarrierAggregation,
                     "ca_bandwidth_mhz" to result.caBandwidthMhz,
                     "ca_band_config" to result.caBandConfig,
@@ -210,7 +237,14 @@ class SpeedtestWorker(
                     "rsrp_variance" to result.rsrpVariance,
                     "ram_usage_percent" to result.ramUsagePercent,
                     "cpu_usage_percent" to result.cpuUsagePercent,
-                    "bg_app_count" to result.bgAppCount
+                    "bg_app_count" to result.bgAppCount,
+                    "band_number_direct" to result.bandNumberDirect,
+                    "ca_components_json" to result.caComponentsJson,
+                    "nr_type" to result.nrType,
+                    "en_dc_available" to result.hiddenEndcAvailable,
+                    "neighbor_cells_json" to result.neighborCellsJson,
+                    "cell_id" to result.cellId,
+                    "enb_id" to result.enbId
                 )
 
                 if (client.postResult(payload)) {
