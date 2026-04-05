@@ -23,6 +23,7 @@ data class SpeedtestResult(
     val distanceKm: Double?,       // サーバーまでの距離(km)
     val resultUrl: String?,        // Speedtest結果URL
     val externalIp: String?,       // 外部IPアドレス
+    val deviceModel: String,
     val isSynced: Boolean = false, // Supabaseへの同期済みフラグ
     val wifiSsid: String? = null,
     val connectionType: String? = null,
@@ -36,6 +37,7 @@ data class SpeedtestResult(
     val bandNumber: Int? = null,
     val networkType: String? = null,
     val carrierName: String? = null,
+    val apn: String? = null,
     val isCarrierAggregation: Boolean? = null,
     val caBandwidthMhz: Int? = null,
     val caBandConfig: String? = null,

@@ -4,7 +4,10 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
+import android.provider.Telephony
 import android.telephony.CellIdentityLte
 import android.telephony.CellIdentityNr
 import android.telephony.CellInfo
@@ -32,6 +35,7 @@ data class CellularInfo(
     val bandNumber: Int? = null,
     val networkType: String? = null,
     val carrierName: String? = null,
+    val apn: String? = null,
     val isCarrierAggregation: Boolean? = null,
     val caBandwidthMhz: Int? = null,
     val caBandConfig: String? = null,
@@ -56,6 +60,7 @@ class CellularInfoCollector(private val context: Context) {
     private var lastServingCellKey: String? = null
 
     fun startTracking() {
+        if (!isCellularActiveNetwork()) return
         if (!hasReadPhoneStatePermission()) return
         val telephonyManager = resolveTelephonyManager()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -99,6 +104,11 @@ class CellularInfoCollector(private val context: Context) {
     }
 
     fun stopAndCollect(): CellularInfo {
+        if (!isCellularActiveNetwork()) {
+            listener = null
+            telephonyCallback = null
+            return CellularInfo()
+        }
         val telephonyManager = resolveTelephonyManager()
         listener?.let {
             try {
@@ -127,6 +137,7 @@ class CellularInfoCollector(private val context: Context) {
             bandNumber = getBandNumber(telephonyManager),
             networkType = getNetworkType(telephonyManager),
             carrierName = telephonyManager.networkOperatorName?.takeIf { it.isNotBlank() },
+            apn = getApn(),
             isCarrierAggregation = getIsCarrierAggregation(telephonyManager),
             caBandwidthMhz = getCaBandwidthMhz(telephonyManager),
             caBandConfig = getCaBandConfig(telephonyManager),
@@ -147,6 +158,19 @@ class CellularInfoCollector(private val context: Context) {
             context,
             Manifest.permission.READ_PHONE_STATE
         ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun isCellularActiveNetwork(): Boolean {
+        return try {
+            val connectivityManager =
+                context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    ?: return false
+            val activeNetwork = connectivityManager.activeNetwork ?: return false
+            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun resolveTelephonyManager(): TelephonyManager {
@@ -196,6 +220,27 @@ class CellularInfoCollector(private val context: Context) {
                 TelephonyManager.NETWORK_TYPE_GPRS -> "GPRS"
                 TelephonyManager.NETWORK_TYPE_UNKNOWN -> "UNKNOWN"
                 else -> telephonyManager.dataNetworkType.toString()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getApn(): String? {
+        if (!isCellularActiveNetwork()) return null
+        return try {
+            context.contentResolver.query(
+                Telephony.Carriers.CONTENT_URI,
+                arrayOf(Telephony.Carriers.APN),
+                "current = ?",
+                arrayOf("1"),
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    cursor.getString(0)?.takeIf { it.isNotBlank() }
+                } else {
+                    null
+                }
             }
         } catch (_: Exception) {
             null
@@ -360,16 +405,19 @@ class CellularInfoCollector(private val context: Context) {
 
     private fun getBandNumber(telephonyManager: TelephonyManager): Int? {
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                getPrimaryLteCell(telephonyManager)
-                    ?.cellIdentity
-                    ?.let(::getLteBand)
-                    ?: getPrimaryNrCell(telephonyManager)
+            getPrimaryLteCell(telephonyManager)
+                ?.cellIdentity
+                ?.let { identity ->
+                    getBandFromEarfcn(identity.earfcn.takeIf { it > 0 && it != Int.MAX_VALUE })
+                        ?: getLteBand(identity)
+                }
+                ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    getPrimaryNrCell(telephonyManager)
                         ?.cellIdentity
                         ?.let { getNrBand(it as? CellIdentityNr) }
-            } else {
-                null
-            }
+                } else {
+                    null
+                }
         } catch (_: Exception) {
             null
         }
@@ -378,11 +426,12 @@ class CellularInfoCollector(private val context: Context) {
     private fun getCaBandwidthMhz(telephonyManager: TelephonyManager): Int? {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                @Suppress("DEPRECATION")
-                telephonyManager.serviceState?.cellBandwidths
-                    ?.takeIf { it.isNotEmpty() }
-                    ?.sum()
+                getPrimaryLteCell(telephonyManager)
+                    ?.cellIdentity
+                    ?.bandwidth
+                    ?.takeIf { it > 0 && it != Int.MAX_VALUE }
                     ?.div(1000)
+                    ?.takeIf { it <= 20 }
             } else {
                 null
             }
@@ -431,6 +480,79 @@ class CellularInfoCollector(private val context: Context) {
     private fun getLteBand(identity: CellIdentityLte?): Int? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         return identity?.bands?.firstOrNull()
+    }
+
+    private fun getBandFromEarfcn(earfcn: Int?): Int? {
+        if (earfcn == null || earfcn <= 0 || earfcn == Int.MAX_VALUE) return null
+        return when (earfcn) {
+            in 0..599 -> 1
+            in 600..1199 -> 2
+            in 1200..1949 -> 3
+            in 1950..2399 -> 4
+            in 2400..2649 -> 5
+            in 2650..2749 -> 6
+            in 2750..3449 -> 7
+            in 3450..3799 -> 8
+            in 3800..4149 -> 9
+            in 4150..4749 -> 10
+            in 4750..4949 -> 11
+            in 5010..5179 -> 12
+            in 5180..5279 -> 13
+            in 5280..5379 -> 14
+            in 5730..5849 -> 17
+            in 5850..5999 -> 18
+            in 6000..6149 -> 19
+            in 6150..6449 -> 20
+            in 6450..6599 -> 21
+            in 6600..7399 -> 22
+            in 7500..7699 -> 23
+            in 7700..8039 -> 24
+            in 8040..8689 -> 25
+            in 8690..9039 -> 26
+            in 9040..9209 -> 27
+            in 9210..9659 -> 28
+            in 9660..9769 -> 29
+            in 9770..9869 -> 30
+            in 9870..9919 -> 31
+            in 9920..10359 -> 32
+            in 36000..36199 -> 33
+            in 36200..36349 -> 34
+            in 36350..36949 -> 35
+            in 36950..37549 -> 36
+            in 37550..37749 -> 37
+            in 37750..38249 -> 38
+            in 38250..38649 -> 39
+            in 38650..39649 -> 40
+            in 39650..41589 -> 41
+            in 41590..43589 -> 42
+            in 43590..45589 -> 43
+            in 45590..46589 -> 44
+            in 46590..46789 -> 45
+            in 46790..54539 -> 46
+            in 54540..55239 -> 47
+            in 55240..56739 -> 48
+            in 56740..58239 -> 49
+            in 58240..59089 -> 50
+            in 59090..59139 -> 51
+            in 59140..60139 -> 52
+            in 60140..60189 -> 53
+            in 65536..66435 -> 65
+            in 66436..67335 -> 66
+            in 67336..67535 -> 67
+            in 67536..67835 -> 68
+            in 67836..68335 -> 69
+            in 68336..68585 -> 70
+            in 68586..68935 -> 71
+            in 68936..68985 -> 72
+            in 68986..69035 -> 73
+            in 69036..69465 -> 74
+            in 69466..70315 -> 75
+            in 70316..70365 -> 76
+            in 70366..70545 -> 85
+            in 70546..70595 -> 87
+            in 70596..70645 -> 88
+            else -> null
+        }
     }
 
     private fun getNrBand(identity: CellIdentityNr?): Int? {

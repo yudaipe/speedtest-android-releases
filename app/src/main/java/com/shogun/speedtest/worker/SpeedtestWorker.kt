@@ -3,6 +3,7 @@ package com.shogun.speedtest.worker
 import android.app.Notification
 import android.content.Context
 import android.content.pm.ServiceInfo
+import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
@@ -91,6 +92,7 @@ class SpeedtestWorker(
             }
             val cellularInfo = cellularCollector.stopAndCollect()
             val deviceMetrics = DeviceMetricsCollector(applicationContext).collect()
+            val deviceModel = Build.MODEL
 
             val entity = SpeedtestResult(
                 timestamp = System.currentTimeMillis() / 1000,
@@ -109,6 +111,7 @@ class SpeedtestWorker(
                 distanceKm = cliResult.distanceKm,
                 resultUrl = cliResult.resultUrl,
                 externalIp = cliResult.externalIp,
+                deviceModel = deviceModel,
                 isSynced = false,
                 wifiSsid = wifiSsid,
                 connectionType = networkType.wireValue,
@@ -122,6 +125,7 @@ class SpeedtestWorker(
                 bandNumber = cellularInfo.bandNumber,
                 networkType = cellularInfo.networkType,
                 carrierName = cellularInfo.carrierName,
+                apn = cellularInfo.apn,
                 isCarrierAggregation = cellularInfo.isCarrierAggregation,
                 caBandwidthMhz = cellularInfo.caBandwidthMhz,
                 caBandConfig = cellularInfo.caBandConfig,
@@ -203,6 +207,7 @@ class SpeedtestWorker(
                     "distance_km" to result.distanceKm,
                     "result_url" to result.resultUrl,
                     "external_ip" to result.externalIp,
+                    "device_model" to result.deviceModel,
                     "software_version" to appVersion,
                     "wifi_ssid" to result.wifiSsid,
                     "connection_type" to result.connectionType,
@@ -216,6 +221,7 @@ class SpeedtestWorker(
                     "band_number" to result.bandNumber,
                     "network_type" to result.networkType,
                     "carrier_name" to result.carrierName,
+                    "apn" to result.apn,
                     "is_carrier_aggregation" to result.isCarrierAggregation,
                     "ca_bandwidth_mhz" to result.caBandwidthMhz,
                     "ca_band_config" to result.caBandConfig,
