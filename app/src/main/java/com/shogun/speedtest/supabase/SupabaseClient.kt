@@ -19,12 +19,15 @@ class SupabaseClient {
 
     private val client = OkHttpClient()
 
-    /**
-     * speedtest_results テーブルに1件POSTする。
-     * Prefer: return=minimal を使用（anon は SELECT 不可のため）。
-     * @return HTTP 201 なら true、それ以外は false
-     */
     fun postResult(payload: Map<String, Any?>): Boolean {
+        return postToTable("speedtest_results", payload)
+    }
+
+    fun postDiagnostic(payload: Map<String, Any?>): Boolean {
+        return postToTable("diagnostic", payload)
+    }
+
+    private fun postToTable(tableName: String, payload: Map<String, Any?>): Boolean {
         val json = JSONObject().apply {
             payload.forEach { (key, value) ->
                 when (value) {
@@ -37,7 +40,7 @@ class SupabaseClient {
         val body = json.toRequestBody(JSON_MEDIA_TYPE)
 
         val request = Request.Builder()
-            .url("$BASE_URL/rest/v1/speedtest_results")
+            .url("$BASE_URL/rest/v1/$tableName")
             .addHeader("apikey", ANON_KEY)
             .addHeader("Authorization", "Bearer $ANON_KEY")
             .addHeader("Prefer", "return=minimal")

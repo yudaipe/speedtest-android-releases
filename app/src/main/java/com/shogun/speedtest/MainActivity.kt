@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
+import com.shogun.speedtest.monitor.SpeedtestMonitorService
 
 class MainActivity : ComponentActivity() {
 
@@ -46,6 +47,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        startForegroundService(Intent(this, SpeedtestMonitorService::class.java))
         requestBatteryOptimizationExemption()
         requestLocationPermissionIfNeeded()
         requestPhoneStatePermissionIfNeeded()

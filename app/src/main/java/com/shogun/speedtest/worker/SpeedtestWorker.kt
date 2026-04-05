@@ -15,6 +15,7 @@ import com.shogun.speedtest.cli.SpeedtestExecutor
 import com.shogun.speedtest.cli.SpeedtestExecutionException
 import com.shogun.speedtest.data.SpeedtestDatabase
 import com.shogun.speedtest.data.SpeedtestResult
+import com.shogun.speedtest.data.WorkerLog
 import com.shogun.speedtest.device.DeviceIdentifier
 import com.shogun.speedtest.location.GpsLocationProvider
 import com.shogun.speedtest.network.CellularInfoCollector
@@ -27,6 +28,8 @@ import com.shogun.speedtest.supabase.SupabaseClient
 import com.shogun.speedtest.WifiSsidProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.IOException
+import java.net.SocketTimeoutException
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -43,6 +46,10 @@ class SpeedtestWorker(
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        val startedAt = System.currentTimeMillis()
+        val db = SpeedtestDatabase.getInstance(applicationContext)
+        recordWorkerLog(db, eventType = "start")
+
         try {
             // ForegroundService昇格（Doze中でも実行保証）
             setForeground(getForegroundInfo())
@@ -85,7 +92,6 @@ class SpeedtestWorker(
             val cellularInfo = cellularCollector.stopAndCollect()
             val deviceMetrics = DeviceMetricsCollector(applicationContext).collect()
 
-            val db = SpeedtestDatabase.getInstance(applicationContext)
             val entity = SpeedtestResult(
                 timestamp = System.currentTimeMillis() / 1000,
                 timestampIso = timestampJst,
@@ -139,12 +145,29 @@ class SpeedtestWorker(
 
             // 5. Supabase送信（未同期分まとめて）
             syncToSupabase(db)
+            recordWorkerLog(
+                db = db,
+                eventType = "complete",
+                result = "success",
+                durationMs = System.currentTimeMillis() - startedAt
+            )
+            syncWorkerLogsToSupabase(db)
 
             Result.success()
         } catch (e: SpeedtestExecutionException) {
+            val durationMs = System.currentTimeMillis() - startedAt
+            val errorReason = classifyErrorReason(e)
+            recordWorkerLog(db, eventType = "complete", result = "fail", durationMs = durationMs)
+            recordWorkerLog(db, eventType = "fail", errorReason = errorReason, durationMs = durationMs)
+            syncWorkerLogsToSupabase(db)
             Log.w(TAG, "CLI execution failed, will retry: ${e.message}")
             Result.retry()
         } catch (e: Exception) {
+            val durationMs = System.currentTimeMillis() - startedAt
+            val errorReason = classifyErrorReason(e)
+            recordWorkerLog(db, eventType = "complete", result = "fail", durationMs = durationMs)
+            recordWorkerLog(db, eventType = "fail", errorReason = errorReason, durationMs = durationMs)
+            syncWorkerLogsToSupabase(db)
             Log.e(TAG, "Unexpected error, will retry: ${e.message}")
             Result.retry()
         }
@@ -222,6 +245,62 @@ class SpeedtestWorker(
             }
         } catch (e: Exception) {
             Log.e(TAG, "syncToSupabase error: ${e.message}")
+        }
+    }
+
+    private suspend fun recordWorkerLog(
+        db: SpeedtestDatabase,
+        eventType: String,
+        result: String? = null,
+        errorReason: String? = null,
+        durationMs: Long? = null
+    ) {
+        val timestamp = Instant.now().toString()
+
+        db.workerLogDao().insert(
+            WorkerLog(
+                timestamp = timestamp,
+                eventType = eventType,
+                result = result,
+                errorReason = errorReason,
+                durationMs = durationMs
+            )
+        )
+    }
+
+    private suspend fun syncWorkerLogsToSupabase(db: SpeedtestDatabase) {
+        try {
+            val client = SupabaseClient()
+            val unsynced = db.workerLogDao().getUnsynced()
+            for (log in unsynced) {
+                val payload = mapOf(
+                    "timestamp" to log.timestamp,
+                    "event_type" to log.eventType,
+                    "result" to log.result,
+                    "error_reason" to log.errorReason,
+                    "duration_ms" to log.durationMs,
+                    "app_type" to "android"
+                )
+                if (client.postDiagnostic(payload)) {
+                    db.workerLogDao().markAsSynced(log.id)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "syncWorkerLogsToSupabase error: ${e.message}")
+        }
+    }
+
+    private fun classifyErrorReason(error: Throwable): String {
+        val message = error.message?.lowercase().orEmpty()
+        return when {
+            error is SocketTimeoutException || message.contains("timeout") -> "timeout"
+            error is IOException ||
+                message.contains("network") ||
+                message.contains("connection") ||
+                message.contains("dns") -> "network_error"
+            error is SpeedtestExecutionException -> "exception"
+            message.isNotBlank() -> "exception"
+            else -> "unknown"
         }
     }
 
