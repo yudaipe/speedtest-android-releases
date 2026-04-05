@@ -13,6 +13,10 @@ import java.util.concurrent.TimeUnit
 object WorkScheduler {
 
     private const val WORK_NAME = "speedtest_periodic"
+    private const val HEADLESS_SUFFIX = ".headless"
+    private const val HALF_HOUR_MINUTES = 30
+    private const val PERIODIC_INTERVAL_MINUTES = 30L
+    private const val HEADLESS_OFFSET_MINUTES = 15
 
     /**
      * 30分毎（毎時00分/30分）に計測を実行するスケジュールを設定
@@ -22,10 +26,10 @@ object WorkScheduler {
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
-        val initialDelay = calculateInitialDelay()
+        val initialDelay = calculateInitialDelay(context)
 
         val workRequest = PeriodicWorkRequestBuilder<SpeedtestWorker>(
-            30, TimeUnit.MINUTES,
+            PERIODIC_INTERVAL_MINUTES, TimeUnit.MINUTES,
             5, TimeUnit.MINUTES  // flex: ±5分の誤差許容
         )
             .setConstraints(constraints)
@@ -42,19 +46,29 @@ object WorkScheduler {
     }
 
     /**
-     * 次の毎時00分 or 30分までのミリ秒を計算
+     * アプリ種別から実行位相を自動判定し、次のスロットまでの待ち時間を計算する
      */
-    fun calculateInitialDelay(): Long {
+    fun calculateInitialDelay(context: Context): Long {
         val now = Calendar.getInstance()
         val minute = now.get(Calendar.MINUTE)
         val second = now.get(Calendar.SECOND)
+        val offsetMinutes = getExecutionOffsetMinutes(context)
+        val nextSlot = if (minute < offsetMinutes) {
+            offsetMinutes.toLong()
+        } else if (minute < offsetMinutes + HALF_HOUR_MINUTES) {
+            (offsetMinutes + HALF_HOUR_MINUTES).toLong()
+        } else {
+            (60 + offsetMinutes).toLong()
+        }
 
-        val nextSlot = if (minute < 30) 30 else 60
-        val delayMinutes = nextSlot - minute
+        val delayMinutes = nextSlot - minute.toLong()
         val delayMs = (delayMinutes * 60 - second) * 1000L
 
         return if (delayMs <= 0) 0 else delayMs
     }
+
+    private fun getExecutionOffsetMinutes(context: Context): Int =
+        if (context.packageName.endsWith(HEADLESS_SUFFIX)) HEADLESS_OFFSET_MINUTES else 0
 
     fun cancelWork(context: Context) {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
@@ -69,10 +83,10 @@ object WorkScheduler {
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
-        val initialDelay = calculateInitialDelay()
+        val initialDelay = calculateInitialDelay(context)
 
         val workRequest = PeriodicWorkRequestBuilder<SpeedtestWorker>(
-            30, TimeUnit.MINUTES,
+            PERIODIC_INTERVAL_MINUTES, TimeUnit.MINUTES,
             5, TimeUnit.MINUTES
         )
             .setConstraints(constraints)
