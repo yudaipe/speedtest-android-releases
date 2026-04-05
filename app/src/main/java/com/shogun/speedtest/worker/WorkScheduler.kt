@@ -2,6 +2,7 @@ package com.shogun.speedtest.worker
 
 import android.content.Context
 import androidx.work.Constraints
+import androidx.work.BackoffPolicy
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
@@ -29,6 +30,7 @@ object WorkScheduler {
         )
             .setConstraints(constraints)
             .setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(WORK_NAME)
             .build()
 
@@ -75,6 +77,7 @@ object WorkScheduler {
         )
             .setConstraints(constraints)
             .setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .addTag(WORK_NAME)
             .build()
 

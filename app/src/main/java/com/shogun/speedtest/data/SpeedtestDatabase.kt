@@ -6,13 +6,14 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [SpeedtestResult::class],
-    version = 5,
+    entities = [SpeedtestResult::class, WorkerLog::class],
+    version = 6,
     exportSchema = false
 )
 abstract class SpeedtestDatabase : RoomDatabase() {
 
     abstract fun speedtestDao(): SpeedtestDao
+    abstract fun workerLogDao(): WorkerLogDao
 
     companion object {
         @Volatile

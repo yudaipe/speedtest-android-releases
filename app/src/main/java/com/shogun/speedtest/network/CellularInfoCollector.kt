@@ -6,13 +6,13 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.telephony.CellIdentityLte
+import android.telephony.CellIdentityNr
 import android.telephony.CellInfo
 import android.telephony.CellInfoLte
 import android.telephony.CellInfoNr
 import android.telephony.CellLocation
 import android.telephony.CellSignalStrengthLte
 import android.telephony.PhoneStateListener
-import android.telephony.ServiceState
 import android.telephony.SignalStrength
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyCallback
@@ -234,9 +234,9 @@ class CellularInfoCollector(private val context: Context) {
 
     private fun getEndcAvailable(telephonyManager: TelephonyManager): Boolean? {
         return try {
-            val serviceState = telephonyManager.serviceState ?: return null
-            val method = ServiceState::class.java.methods.firstOrNull { it.name == "isNrAvailable" } ?: return null
-            method.invoke(serviceState) as? Boolean
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+            getPrimaryNrCell(telephonyManager) != null ||
+                telephonyManager.dataNetworkType == TelephonyManager.NETWORK_TYPE_NR
         } catch (_: Exception) {
             null
         }
@@ -348,7 +348,7 @@ class CellularInfoCollector(private val context: Context) {
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 getPrimaryNrCell(telephonyManager)
                     ?.cellIdentity
-                    ?.let { getIntViaReflection(it, "getNrarfcn") }
+                    ?.let { (it as? CellIdentityNr)?.nrarfcn }
                     ?.takeIf { it > 0 && it != Int.MAX_VALUE }
             } else {
                 null
@@ -363,10 +363,10 @@ class CellularInfoCollector(private val context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 getPrimaryLteCell(telephonyManager)
                     ?.cellIdentity
-                    ?.let { getBandsViaReflection(it)?.firstOrNull() }
+                    ?.let(::getLteBand)
                     ?: getPrimaryNrCell(telephonyManager)
                         ?.cellIdentity
-                        ?.let { getBandsViaReflection(it)?.firstOrNull() }
+                        ?.let { getNrBand(it as? CellIdentityNr) }
             } else {
                 null
             }
@@ -402,11 +402,7 @@ class CellularInfoCollector(private val context: Context) {
                 val entry = when {
                     cell is CellInfoLte -> {
                         val identity = cell.cellIdentity
-                        val band = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            getBandsViaReflection(identity)?.firstOrNull()
-                        } else {
-                            null
-                        }
+                        val band = getLteBand(identity)
                         val bandwidthMhz = identity.bandwidth
                             .takeIf { it > 0 && it != Int.MAX_VALUE }
                             ?.div(1000)
@@ -417,7 +413,7 @@ class CellularInfoCollector(private val context: Context) {
                         }
                     }
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && cell is CellInfoNr -> {
-                        val band = getBandsViaReflection(cell.cellIdentity)?.firstOrNull()
+                        val band = getNrBand(cell.cellIdentity as? CellIdentityNr)
                         band?.let { "NR-Band$it" }
                     }
                     else -> null
@@ -432,20 +428,23 @@ class CellularInfoCollector(private val context: Context) {
         }
     }
 
+    private fun getLteBand(identity: CellIdentityLte?): Int? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return identity?.bands?.firstOrNull()
+    }
+
+    private fun getNrBand(identity: CellIdentityNr?): Int? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        return identity?.bands?.firstOrNull()
+    }
+
     private fun getNrState(telephonyManager: TelephonyManager): String? {
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val serviceState = telephonyManager.serviceState ?: return null
-                val method = ServiceState::class.java.getMethod("getNrState")
-                when (method.invoke(serviceState) as? Int) {
-                    0 -> "NONE"
-                    1 -> "RESTRICTED"
-                    2 -> "NOT_RESTRICTED"
-                    3 -> "CONNECTED"
-                    else -> null
-                }
-            } else {
-                null
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+            when {
+                telephonyManager.dataNetworkType == TelephonyManager.NETWORK_TYPE_NR -> "CONNECTED"
+                getPrimaryNrCell(telephonyManager) != null -> "AVAILABLE"
+                else -> "NONE"
             }
         } catch (_: Exception) {
             null
@@ -526,24 +525,6 @@ class CellularInfoCollector(private val context: Context) {
             ?.let { cells ->
                 cells.firstOrNull { it.isRegistered } ?: cells.firstOrNull()
             }
-    }
-
-    private fun getBandsViaReflection(identity: Any): IntArray? {
-        return try {
-            val method = identity.javaClass.methods.firstOrNull { it.name == "getBands" } ?: return null
-            method.invoke(identity) as? IntArray
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun getIntViaReflection(target: Any, methodName: String): Int? {
-        return try {
-            val method = target.javaClass.methods.firstOrNull { it.name == methodName } ?: return null
-            method.invoke(target) as? Int
-        } catch (_: Exception) {
-            null
-        }
     }
 
     private fun hasFineLocationPermission(): Boolean {

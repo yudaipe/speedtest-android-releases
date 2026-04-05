@@ -3,8 +3,10 @@ package com.shogun.speedtest
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Intent
 import android.os.Build
 import androidx.work.Configuration
+import com.shogun.speedtest.monitor.SpeedtestMonitorService
 import com.shogun.speedtest.worker.SpeedtestWorker
 import com.shogun.speedtest.worker.WorkScheduler
 
@@ -19,6 +21,7 @@ class SpeedtestApp : Application(), Configuration.Provider {
         super.onCreate()
         createNotificationChannel()
         WorkScheduler.schedule(this)
+        startForegroundService(Intent(this, SpeedtestMonitorService::class.java))
     }
 
     private fun createNotificationChannel() {
