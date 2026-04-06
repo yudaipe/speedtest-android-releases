@@ -6,6 +6,20 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
+enum class SupabaseFailureKind {
+    TRANSIENT,
+    FATAL
+}
+
+sealed interface SupabasePostResult {
+    data object Success : SupabasePostResult
+    data class Failure(
+        val kind: SupabaseFailureKind,
+        val httpCode: Int? = null,
+        val message: String? = null
+    ) : SupabasePostResult
+}
+
 class SupabaseClient {
 
     companion object {
@@ -19,15 +33,15 @@ class SupabaseClient {
 
     private val client = OkHttpClient()
 
-    fun postResult(payload: Map<String, Any?>): Boolean {
+    fun postResult(payload: Map<String, Any?>): SupabasePostResult {
         return postToTable("speedtest_results", payload)
     }
 
-    fun postDiagnostic(payload: Map<String, Any?>): Boolean {
+    fun postDiagnostic(payload: Map<String, Any?>): SupabasePostResult {
         return postToTable("diagnostic", payload)
     }
 
-    private fun postToTable(tableName: String, payload: Map<String, Any?>): Boolean {
+    private fun postToTable(tableName: String, payload: Map<String, Any?>): SupabasePostResult {
         val json = JSONObject().apply {
             payload.forEach { (key, value) ->
                 when (value) {
@@ -49,11 +63,27 @@ class SupabaseClient {
 
         return try {
             val response = client.newCall(request).execute()
-            val success = response.code == 201
+            val code = response.code
+            val message = response.message
             response.close()
-            success
+            if (code == 201) {
+                SupabasePostResult.Success
+            } else {
+                SupabasePostResult.Failure(
+                    kind = if (code in 500..599 || code == 408 || code == 429) {
+                        SupabaseFailureKind.TRANSIENT
+                    } else {
+                        SupabaseFailureKind.FATAL
+                    },
+                    httpCode = code,
+                    message = message
+                )
+            }
         } catch (e: Exception) {
-            false
+            SupabasePostResult.Failure(
+                kind = SupabaseFailureKind.TRANSIENT,
+                message = e.message
+            )
         }
     }
 }
