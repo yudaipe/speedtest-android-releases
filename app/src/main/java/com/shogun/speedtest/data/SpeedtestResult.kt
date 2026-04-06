@@ -1,5 +1,6 @@
 package com.shogun.speedtest.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -39,6 +40,7 @@ data class SpeedtestResult(
     val carrierName: String? = null,
     val apn: String? = null,
     val isCarrierAggregation: Boolean? = null,
+    @ColumnInfo(name = "is_ca") val isCa: String? = null,
     val caBandwidthMhz: Int? = null,
     val caBandConfig: String? = null,
     val nrState: String? = null,

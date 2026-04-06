@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.provider.Settings
 import android.provider.Telephony
 import android.telephony.CellIdentityLte
 import android.telephony.CellIdentityNr
@@ -23,6 +24,7 @@ import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
 import androidx.core.content.ContextCompat.getMainExecutor
 import java.util.Collections
+import kotlin.math.roundToInt
 
 data class CellularInfo(
     val rsrpDbm: Int? = null,
@@ -37,6 +39,7 @@ data class CellularInfo(
     val carrierName: String? = null,
     val apn: String? = null,
     val isCarrierAggregation: Boolean? = null,
+    val isCa: String? = null,
     val caBandwidthMhz: Int? = null,
     val caBandConfig: String? = null,
     val nrState: String? = null,
@@ -51,6 +54,12 @@ data class CellularInfo(
 )
 
 class CellularInfoCollector(private val context: Context) {
+
+    private enum class ActiveTransport {
+        CELLULAR,
+        WIFI,
+        OTHER
+    }
 
     private val rsrpSamples = Collections.synchronizedList(mutableListOf<Int>())
     private var handoverCount = 0
@@ -104,10 +113,13 @@ class CellularInfoCollector(private val context: Context) {
     }
 
     fun stopAndCollect(): CellularInfo {
-        if (!isCellularActiveNetwork()) {
+        val activeTransport = getActiveTransport()
+        if (activeTransport != ActiveTransport.CELLULAR) {
             listener = null
             telephonyCallback = null
-            return CellularInfo()
+            return CellularInfo(
+                networkType = if (activeTransport == ActiveTransport.WIFI) "WIFI" else null
+            )
         }
         val telephonyManager = resolveTelephonyManager()
         listener?.let {
@@ -139,6 +151,7 @@ class CellularInfoCollector(private val context: Context) {
             carrierName = telephonyManager.networkOperatorName?.takeIf { it.isNotBlank() },
             apn = getApn(),
             isCarrierAggregation = getIsCarrierAggregation(telephonyManager),
+            isCa = getIsCa(telephonyManager, activeTransport),
             caBandwidthMhz = getCaBandwidthMhz(telephonyManager),
             caBandConfig = getCaBandConfig(telephonyManager),
             nrState = getNrState(telephonyManager),
@@ -161,15 +174,24 @@ class CellularInfoCollector(private val context: Context) {
     }
 
     private fun isCellularActiveNetwork(): Boolean {
+        return getActiveTransport() == ActiveTransport.CELLULAR
+    }
+
+    private fun getActiveTransport(): ActiveTransport {
         return try {
             val connectivityManager =
                 context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-                    ?: return false
-            val activeNetwork = connectivityManager.activeNetwork ?: return false
-            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+                    ?: return ActiveTransport.OTHER
+            val activeNetwork = connectivityManager.activeNetwork ?: return ActiveTransport.OTHER
+            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
+                ?: return ActiveTransport.OTHER
+            when {
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> ActiveTransport.WIFI
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> ActiveTransport.CELLULAR
+                else -> ActiveTransport.OTHER
+            }
         } catch (_: Exception) {
-            false
+            ActiveTransport.OTHER
         }
     }
 
@@ -211,15 +233,19 @@ class CellularInfoCollector(private val context: Context) {
 
     private fun getNetworkType(telephonyManager: TelephonyManager): String? {
         return try {
-            when (telephonyManager.dataNetworkType) {
-                TelephonyManager.NETWORK_TYPE_NR -> "NR"
-                TelephonyManager.NETWORK_TYPE_LTE -> "LTE"
-                TelephonyManager.NETWORK_TYPE_HSPAP -> "HSPAP"
-                TelephonyManager.NETWORK_TYPE_HSPA -> "HSPA"
-                TelephonyManager.NETWORK_TYPE_EDGE -> "EDGE"
-                TelephonyManager.NETWORK_TYPE_GPRS -> "GPRS"
-                TelephonyManager.NETWORK_TYPE_UNKNOWN -> "UNKNOWN"
-                else -> telephonyManager.dataNetworkType.toString()
+            when (getActiveTransport()) {
+                ActiveTransport.WIFI -> "WIFI"
+                ActiveTransport.CELLULAR -> when (telephonyManager.dataNetworkType) {
+                    TelephonyManager.NETWORK_TYPE_NR -> "NR"
+                    TelephonyManager.NETWORK_TYPE_LTE -> "LTE"
+                    TelephonyManager.NETWORK_TYPE_HSPAP -> "HSPAP"
+                    TelephonyManager.NETWORK_TYPE_HSPA -> "HSPA"
+                    TelephonyManager.NETWORK_TYPE_EDGE -> "EDGE"
+                    TelephonyManager.NETWORK_TYPE_GPRS -> "GPRS"
+                    TelephonyManager.NETWORK_TYPE_UNKNOWN -> "UNKNOWN"
+                    else -> telephonyManager.dataNetworkType.toString()
+                }
+                ActiveTransport.OTHER -> null
             }
         } catch (_: Exception) {
             null
@@ -227,13 +253,37 @@ class CellularInfoCollector(private val context: Context) {
     }
 
     private fun getApn(): String? {
-        if (!isCellularActiveNetwork()) return null
+        if (getActiveTransport() != ActiveTransport.CELLULAR) return null
+        return queryApn(
+            Telephony.Carriers.CONTENT_URI,
+            "current = ?",
+            arrayOf("1")
+        ) ?: queryPreferredApn()
+            ?: Settings.Global.getString(context.contentResolver, "apn_name")?.takeIf { it.isNotBlank() }
+    }
+
+    private fun queryPreferredApn(): String? {
+        val dataSubId = getDataSubscriptionId()
+        val candidateUris = buildList {
+            if (dataSubId != SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+                add(android.net.Uri.parse("content://telephony/carriers/preferapn/subId/$dataSubId"))
+            }
+            add(android.net.Uri.parse("content://telephony/carriers/preferapn"))
+        }
+        return candidateUris.firstNotNullOfOrNull { uri -> queryApn(uri, null, null) }
+    }
+
+    private fun queryApn(
+        uri: android.net.Uri,
+        selection: String?,
+        selectionArgs: Array<String>?
+    ): String? {
         return try {
             context.contentResolver.query(
-                Telephony.Carriers.CONTENT_URI,
+                uri,
                 arrayOf(Telephony.Carriers.APN),
-                "current = ?",
-                arrayOf("1"),
+                selection,
+                selectionArgs,
                 null
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
@@ -242,8 +292,22 @@ class CellularInfoCollector(private val context: Context) {
                     null
                 }
             }
+        } catch (_: SecurityException) {
+            null
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private fun getDataSubscriptionId(): Int {
+        return try {
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> SubscriptionManager.getActiveDataSubscriptionId()
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.N -> SubscriptionManager.getDefaultDataSubscriptionId()
+                else -> SubscriptionManager.INVALID_SUBSCRIPTION_ID
+            }
+        } catch (_: Throwable) {
+            SubscriptionManager.INVALID_SUBSCRIPTION_ID
         }
     }
 
@@ -252,6 +316,20 @@ class CellularInfoCollector(private val context: Context) {
         if (!bands.isNullOrBlank() && bands.contains("+")) return true
         val bandwidth = getCaBandwidthMhz(telephonyManager)
         return bandwidth?.let { it > 20 }
+    }
+
+    private fun getIsCa(
+        telephonyManager: TelephonyManager,
+        activeTransport: ActiveTransport = getActiveTransport()
+    ): String? {
+        return when (activeTransport) {
+            ActiveTransport.WIFI -> "-"
+            ActiveTransport.CELLULAR -> {
+                val registeredCount = getRegisteredCellCount(telephonyManager) ?: return null
+                if (registeredCount >= 2) "yes" else "no"
+            }
+            ActiveTransport.OTHER -> null
+        }
     }
 
     private fun getTimingAdvance(telephonyManager: TelephonyManager): Int? {
@@ -272,6 +350,14 @@ class CellularInfoCollector(private val context: Context) {
     private fun getVisibleCellCount(telephonyManager: TelephonyManager): Int? {
         return try {
             getAllCellInfo(telephonyManager)?.size
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun getRegisteredCellCount(telephonyManager: TelephonyManager): Int? {
+        return try {
+            getAllCellInfo(telephonyManager)?.count { it.isRegistered }
         } catch (_: Exception) {
             null
         }
@@ -354,7 +440,7 @@ class CellularInfoCollector(private val context: Context) {
                     ?.filterIsInstance<CellSignalStrengthLte>()
                     ?.firstOrNull()
                     ?.cqi
-                    ?.takeIf { it in 0..15 }
+                    ?.takeIf { it != CellInfo.UNAVAILABLE && it in 1..15 }
             } else {
                 null
             }
@@ -430,8 +516,8 @@ class CellularInfoCollector(private val context: Context) {
                     ?.cellIdentity
                     ?.bandwidth
                     ?.takeIf { it > 0 && it != Int.MAX_VALUE }
-                    ?.div(1000)
-                    ?.takeIf { it <= 20 }
+                    ?.let { (it / 1000.0).roundToInt() }
+                    ?.takeIf { it > 0 }
             } else {
                 null
             }
