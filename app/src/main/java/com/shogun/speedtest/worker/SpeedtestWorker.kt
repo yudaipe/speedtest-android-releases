@@ -288,6 +288,7 @@ class SpeedtestWorker(
                     "ttfb_ms" to result.ttfbMs,
                     "tcp_connect_ms" to result.tcpConnectMs,
                     "rsrp_variance" to result.rsrpVariance,
+                    "rsrp_std" to result.rsrpStd,
                     "ram_usage_percent" to result.ramUsagePercent,
                     "cpu_usage_percent" to result.cpuUsagePercent,
                     "bg_app_count" to result.bgAppCount
