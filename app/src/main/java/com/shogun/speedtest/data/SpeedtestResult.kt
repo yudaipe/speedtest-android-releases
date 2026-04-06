@@ -54,6 +54,7 @@ data class SpeedtestResult(
     val dnsResolveMs: Double? = null,
     val ttfbMs: Double? = null,
     val tcpConnectMs: Double? = null,
+    val rsrpStd: Double? = null,
     val rsrpVariance: Double? = null,
     val ramUsagePercent: Double? = null,
     val cpuUsagePercent: Double? = null,

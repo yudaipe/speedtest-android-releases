@@ -169,6 +169,7 @@ class SpeedtestWorker(
                 dnsResolveMs = networkQuality.dnsResolveMs,
                 ttfbMs = networkQuality.ttfbMs,
                 tcpConnectMs = networkQuality.tcpConnectMs,
+                rsrpStd = cellularInfo.rsrpStd,
                 rsrpVariance = cellularInfo.rsrpVariance,
                 ramUsagePercent = deviceMetrics.ramUsagePercent,
                 cpuUsagePercent = deviceMetrics.cpuUsagePercent,

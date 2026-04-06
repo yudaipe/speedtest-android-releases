@@ -58,7 +58,7 @@ object CsvExporter {
         "carrierName", "apn", "isCarrierAggregation", "is_ca", "caBandwidthMhz",
         "caBandConfig", "nrState", "mcc", "mnc", "cqi",
         "timingAdvance", "visibleCellCount", "handoverCount", "endcAvailable",
-        "dnsResolveMs", "ttfbMs", "tcpConnectMs", "rsrpVariance",
+        "dnsResolveMs", "ttfbMs", "tcpConnectMs", "rsrpStd", "rsrpVariance",
         "ramUsagePercent", "cpuUsagePercent", "bgAppCount", "sync_failed"
     ).joinToString(",")
 
@@ -76,7 +76,7 @@ object CsvExporter {
         esc(r.nrState), esc(r.mcc), esc(r.mnc),
         r.cqi, r.timingAdvance, r.visibleCellCount, r.handoverCount,
         r.endcAvailable, r.dnsResolveMs, r.ttfbMs, r.tcpConnectMs,
-        r.rsrpVariance, r.ramUsagePercent, r.cpuUsagePercent, r.bgAppCount, r.syncFailed
+        r.rsrpStd, r.rsrpVariance, r.ramUsagePercent, r.cpuUsagePercent, r.bgAppCount, r.syncFailed
     ).joinToString(",")
 
     private fun esc(value: Any?): String {

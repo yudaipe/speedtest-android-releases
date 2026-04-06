@@ -23,8 +23,10 @@ import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
 import androidx.core.content.ContextCompat.getMainExecutor
-import java.util.Collections
+import com.shogun.speedtest.config.constants.RsrpSamplingConstants.RSRP_SAMPLE_COUNT
+import com.shogun.speedtest.config.constants.RsrpSamplingConstants.RSRP_SAMPLE_INTERVAL_MS
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 data class CellularInfo(
     val rsrpDbm: Int? = null,
@@ -50,7 +52,14 @@ data class CellularInfo(
     val visibleCellCount: Int? = null,
     val handoverCount: Int? = null,
     val endcAvailable: Boolean? = null,
+    val rsrpStd: Double? = null,
     val rsrpVariance: Double? = null
+)
+
+private data class RsrpSamplingStats(
+    val meanDbm: Int? = null,
+    val stdDb: Double? = null,
+    val varianceDb: Double? = null
 )
 
 class CellularInfoCollector(private val context: Context) {
@@ -61,7 +70,6 @@ class CellularInfoCollector(private val context: Context) {
         OTHER
     }
 
-    private val rsrpSamples = Collections.synchronizedList(mutableListOf<Int>())
     private var handoverCount = 0
     private var firstCellLocationObserved = false
     private var listener: PhoneStateListener? = null
@@ -83,8 +91,6 @@ class CellularInfoCollector(private val context: Context) {
         } else {
             val phoneStateListener = object : PhoneStateListener() {
                 override fun onSignalStrengthsChanged(signalStrength: SignalStrength?) {
-                    signalStrength ?: return
-                    sampleRsrp(signalStrength, telephonyManager)
                 }
 
                 override fun onCellLocationChanged(location: CellLocation?) {
@@ -105,10 +111,6 @@ class CellularInfoCollector(private val context: Context) {
             } catch (_: Exception) {
                 listener = null
             }
-        }
-        try {
-            telephonyManager.signalStrength?.let { sampleRsrp(it, telephonyManager) }
-        } catch (_: Exception) {
         }
     }
 
@@ -137,9 +139,10 @@ class CellularInfoCollector(private val context: Context) {
         }
         listener = null
         telephonyCallback = null
+        val rsrpStats = calculateRsrpSamplingStats(collectRsrpSamples(telephonyManager))
 
         return CellularInfo(
-            rsrpDbm = getRsrp(telephonyManager),
+            rsrpDbm = rsrpStats.meanDbm,
             rsrqDb = getRsrq(telephonyManager),
             sinrDb = getSinr(telephonyManager),
             rssiDbm = getRssi(telephonyManager),
@@ -162,7 +165,8 @@ class CellularInfoCollector(private val context: Context) {
             visibleCellCount = getVisibleCellCount(telephonyManager),
             handoverCount = handoverCount,
             endcAvailable = getEndcAvailable(telephonyManager),
-            rsrpVariance = getRsrpVariance()
+            rsrpStd = rsrpStats.stdDb,
+            rsrpVariance = rsrpStats.varianceDb
         )
     }
 
@@ -216,19 +220,33 @@ class CellularInfoCollector(private val context: Context) {
         }
     }
 
-    private fun sampleRsrp(signalStrength: SignalStrength, telephonyManager: TelephonyManager) {
-        (getRsrpFromSignalStrength(signalStrength) ?: getRsrpFromCells(telephonyManager))
-            ?.let { rsrpSamples.add(it) }
+    private fun collectRsrpSamples(telephonyManager: TelephonyManager): List<Int> {
+        val samples = mutableListOf<Int>()
+        repeat(RSRP_SAMPLE_COUNT) { index ->
+            readCurrentRsrp(telephonyManager)?.let(samples::add)
+            if (index < RSRP_SAMPLE_COUNT - 1) {
+                Thread.sleep(RSRP_SAMPLE_INTERVAL_MS)
+            }
+        }
+        return samples
     }
 
-    private fun getRsrpVariance(): Double? {
-        val samples = synchronized(rsrpSamples) { rsrpSamples.toList() }
-        if (samples.size < 2) return null
+    private fun calculateRsrpSamplingStats(samples: List<Int>): RsrpSamplingStats {
+        if (samples.isEmpty()) return RsrpSamplingStats()
         val mean = samples.average()
-        return samples.map { sample ->
-            val diff = sample - mean
-            diff * diff
-        }.average()
+        val variance = if (samples.size < 2) {
+            null
+        } else {
+            samples.map { sample ->
+                val diff = sample - mean
+                diff * diff
+            }.average()
+        }
+        return RsrpSamplingStats(
+            meanDbm = mean.roundToInt(),
+            stdDb = variance?.let(::sqrt),
+            varianceDb = variance
+        )
     }
 
     private fun getNetworkType(telephonyManager: TelephonyManager): String? {
@@ -374,6 +392,10 @@ class CellularInfoCollector(private val context: Context) {
     }
 
     private fun getRsrp(telephonyManager: TelephonyManager): Int? {
+        return readCurrentRsrp(telephonyManager)
+    }
+
+    private fun readCurrentRsrp(telephonyManager: TelephonyManager): Int? {
         return try {
             telephonyManager.signalStrength?.let { getRsrpFromSignalStrength(it) } ?: getRsrpFromCells(telephonyManager)
         } catch (_: Exception) {
@@ -696,7 +718,7 @@ class CellularInfoCollector(private val context: Context) {
         TelephonyCallback.CellInfoListener {
 
         override fun onSignalStrengthsChanged(signalStrength: SignalStrength) {
-            sampleRsrp(signalStrength, telephonyManager)
+            updateServingCellState(getAllCellInfo(telephonyManager))
         }
 
         override fun onCellInfoChanged(cellInfo: MutableList<CellInfo>) {
