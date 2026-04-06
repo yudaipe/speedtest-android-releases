@@ -66,7 +66,7 @@ class SupabaseClient {
             val code = response.code
             val message = response.message
             response.close()
-            if (code == 201) {
+            if (code in 200..299) {
                 SupabasePostResult.Success
             } else {
                 SupabasePostResult.Failure(
