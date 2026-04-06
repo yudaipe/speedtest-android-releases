@@ -26,15 +26,25 @@ class SpeedtestApp : Application(), Configuration.Provider {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                SpeedtestWorker.CHANNEL_ID,
-                "Speedtest Monitor",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "バックグラウンド速度計測の通知チャネル"
-            }
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.createNotificationChannel(channel)
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    SpeedtestWorker.CHANNEL_ID,
+                    "Speedtest Monitor",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "バックグラウンド速度計測の通知チャネル"
+                }
+            )
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    SpeedtestWorker.ERROR_CHANNEL_ID,
+                    "Speedtest エラー通知",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "速度計測エラーの通知チャネル"
+                }
+            )
         }
     }
 }

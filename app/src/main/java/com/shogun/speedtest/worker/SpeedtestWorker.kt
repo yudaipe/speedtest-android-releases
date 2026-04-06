@@ -1,8 +1,11 @@
 package com.shogun.speedtest.worker
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -47,12 +50,24 @@ class SpeedtestWorker(
         private const val MAX_SUPABASE_RETRY_ATTEMPTS = 3
         const val CHANNEL_ID = "speedtest_channel"
         const val NOTIFICATION_ID = 1001
+        const val ERROR_CHANNEL_ID = "speedtest_error_channel"
+        private const val ERROR_NOTIFICATION_ID = 1002
+        private const val SYNC_RETRY_NOTIFICATION_ID = 1003
+        private const val RETRY_INTERVAL_MINUTES = 30
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val startedAt = System.currentTimeMillis()
         val db = SpeedtestDatabase.getInstance(applicationContext)
         recordWorkerLog(db, eventType = "start")
+
+        // ネットワーク不通チェック（ConnectivityManager）
+        if (!isNetworkAvailable()) {
+            Log.w(TAG, "Network unavailable: skipping speedtest")
+            showErrorNotification("no_network")
+            recordWorkerLog(db, eventType = "complete", result = "fail", durationMs = System.currentTimeMillis() - startedAt)
+            return@withContext Result.failure()
+        }
 
         try {
             // ForegroundService昇格（Doze中でも実行保証）
@@ -173,7 +188,11 @@ class SpeedtestWorker(
 
             // C-2: sync失敗でもResult.retry()は使わない。次回の定期実行で再送する。
             if (syncOutcome.shouldRetry) {
+                val unsyncedCount = db.speedtestDao().getUnsynced().size
                 Log.w(TAG, "Transient Supabase error, will retry on next scheduled run: ${syncOutcome.logMessage}")
+                if (unsyncedCount > 0) {
+                    showSyncRetryNotification(unsyncedCount)
+                }
             }
             Result.success()
         } catch (e: SpeedtestExecutionException) {
@@ -182,6 +201,7 @@ class SpeedtestWorker(
             recordWorkerLog(db, eventType = "complete", result = "fail", durationMs = durationMs)
             recordWorkerLog(db, eventType = "fail", errorReason = errorReason, durationMs = durationMs)
             syncWorkerLogsToSupabase(db)
+            showErrorNotification(errorReason)
             if (canRetryWorker()) {
                 Log.w(TAG, "CLI execution failed, will retry: ${e.message}")
                 Result.retry()
@@ -195,6 +215,7 @@ class SpeedtestWorker(
             recordWorkerLog(db, eventType = "complete", result = "fail", durationMs = durationMs)
             recordWorkerLog(db, eventType = "fail", errorReason = errorReason, durationMs = durationMs)
             syncWorkerLogsToSupabase(db)
+            showErrorNotification(errorReason)
             if (canRetryWorker()) {
                 Log.e(TAG, "Unexpected error, will retry: ${e.message}")
                 Result.retry()
@@ -355,14 +376,70 @@ class SpeedtestWorker(
     private fun classifyErrorReason(error: Throwable): String {
         val message = error.message?.lowercase().orEmpty()
         return when {
-            error is SocketTimeoutException || message.contains("timeout") -> "timeout"
+            error is SocketTimeoutException || message.contains("timeout after") || message.contains("timeout") -> "timeout"
+            message.contains("dns") || message.contains("no such host") || message.contains("unable to resolve") -> "dns_failure"
+            message.contains("connection refused") || message.contains("econnrefused") -> "connection_refused"
             error is IOException ||
                 message.contains("network") ||
-                message.contains("connection") ||
-                message.contains("dns") -> "network_error"
-            error is SpeedtestExecutionException -> "exception"
+                message.contains("connection") -> "network_error"
+            error is SpeedtestExecutionException -> "cli_error"
             message.isNotBlank() -> "exception"
             else -> "unknown"
+        }
+    }
+
+    private fun isNetworkAvailable(): Boolean {
+        val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun showErrorNotification(errorKind: String) {
+        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        ensureErrorChannel(manager)
+        val (title, text) = when (errorKind) {
+            "no_network" -> "ネットワーク未接続" to "Wi-Fiまたはモバイルデータが無効です"
+            "timeout" -> "計測タイムアウト" to "サーバー応答待ちで120秒超過しました"
+            "dns_failure" -> "DNS解決失敗" to "ホスト名の解決に失敗しました。ネットワーク設定を確認してください"
+            "connection_refused" -> "接続拒否" to "speedtestサーバーへの接続が拒否されました"
+            "network_error" -> "ネットワークエラー" to "ネットワーク接続を確認してください"
+            "cli_error" -> "計測失敗" to "speedtest CLIの実行に失敗しました"
+            else -> "計測失敗" to "予期しないエラーが発生しました"
+        }
+        val notification = NotificationCompat.Builder(applicationContext, ERROR_CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_speed)
+            .setAutoCancel(true)
+            .build()
+        manager.notify(ERROR_NOTIFICATION_ID, notification)
+    }
+
+    private fun showSyncRetryNotification(pendingCount: Int) {
+        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        ensureErrorChannel(manager)
+        val text = "未送信${pendingCount}件、次回リトライ: 約${RETRY_INTERVAL_MINUTES}分後"
+        val notification = NotificationCompat.Builder(applicationContext, ERROR_CHANNEL_ID)
+            .setContentTitle("Supabase送信待ち")
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_speed)
+            .setAutoCancel(true)
+            .build()
+        manager.notify(SYNC_RETRY_NOTIFICATION_ID, notification)
+    }
+
+    private fun ensureErrorChannel(manager: NotificationManager) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            manager.getNotificationChannel(ERROR_CHANNEL_ID) == null
+        ) {
+            manager.createNotificationChannel(
+                android.app.NotificationChannel(
+                    ERROR_CHANNEL_ID,
+                    "Speedtest エラー通知",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply { description = "速度計測エラーの通知チャネル" }
+            )
         }
     }
 
