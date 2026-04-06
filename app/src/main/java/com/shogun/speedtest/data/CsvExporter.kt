@@ -1,10 +1,13 @@
 package com.shogun.speedtest.data
 
+import android.Manifest
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
@@ -13,7 +16,18 @@ import java.util.Locale
 
 object CsvExporter {
 
+    fun requiresLegacyWritePermission(context: Context): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) != PackageManager.PERMISSION_GRANTED
+    }
+
     fun export(context: Context, results: List<SpeedtestResult>): String {
+        if (requiresLegacyWritePermission(context)) {
+            throw SecurityException("WRITE_EXTERNAL_STORAGE permission is required on Android 8-9")
+        }
         val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
         val fileName = "speedtest_export_${sdf.format(Date())}.csv"
         val csvContent = buildString {

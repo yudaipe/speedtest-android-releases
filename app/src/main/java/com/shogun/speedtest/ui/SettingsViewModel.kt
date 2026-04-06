@@ -20,7 +20,8 @@ data class SettingsUiState(
     val lastResult: SpeedtestResult? = null,
     val unsyncedCount: Int = 0,
     val isExporting: Boolean = false,
-    val exportResult: String? = null
+    val exportResult: String? = null,
+    val requestLegacyStoragePermission: Boolean = false
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -45,6 +46,34 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun exportCsv() {
+        if (CsvExporter.requiresLegacyWritePermission(getApplication())) {
+            _uiState.value = _uiState.value.copy(
+                isExporting = false,
+                exportResult = null,
+                requestLegacyStoragePermission = true
+            )
+            return
+        }
+        performExport()
+    }
+
+    fun consumeLegacyStoragePermissionRequest() {
+        _uiState.value = _uiState.value.copy(requestLegacyStoragePermission = false)
+    }
+
+    fun onLegacyStoragePermissionResult(granted: Boolean) {
+        _uiState.value = _uiState.value.copy(requestLegacyStoragePermission = false)
+        if (granted) {
+            performExport()
+            return
+        }
+        _uiState.value = _uiState.value.copy(
+            isExporting = false,
+            exportResult = "エラー: Android 8-9ではストレージ権限が必要です"
+        )
+    }
+
+    private fun performExport() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isExporting = true, exportResult = null)
             try {

@@ -1,9 +1,13 @@
 package com.shogun.speedtest.ui
 
+import android.Manifest
 import android.app.DownloadManager
 import android.content.Context
+import android.os.Build
 import android.os.PowerManager
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,12 +49,26 @@ import kotlinx.coroutines.withContext
 fun SettingsScreen(viewModel: SettingsViewModel) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val writePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.onLegacyStoragePermissionResult(granted)
+    }
 
     // エクスポート結果をToastで表示
     state.exportResult?.let { msg ->
         LaunchedEffect(msg) {
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
             viewModel.clearExportResult()
+        }
+    }
+
+    if (state.requestLegacyStoragePermission) {
+        LaunchedEffect(state.requestLegacyStoragePermission) {
+            viewModel.consumeLegacyStoragePermissionRequest()
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                writePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
         }
     }
 
