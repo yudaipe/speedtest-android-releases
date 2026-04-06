@@ -57,5 +57,7 @@ data class SpeedtestResult(
     val rsrpVariance: Double? = null,
     val ramUsagePercent: Double? = null,
     val cpuUsagePercent: Double? = null,
-    val bgAppCount: Int? = null
+    val bgAppCount: Int? = null,
+    @ColumnInfo(name = "sync_failed")
+    val syncFailed: Boolean = false
 )

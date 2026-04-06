@@ -26,6 +26,8 @@ import com.shogun.speedtest.network.NetworkType
 import com.shogun.speedtest.network.NetworkTypeDetector
 import com.shogun.speedtest.settings.SettingsRepository
 import com.shogun.speedtest.supabase.SupabaseClient
+import com.shogun.speedtest.supabase.SupabaseFailureKind
+import com.shogun.speedtest.supabase.SupabasePostResult
 import com.shogun.speedtest.WifiSsidProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -42,6 +44,7 @@ class SpeedtestWorker(
 
     companion object {
         private const val TAG = "SpeedtestWorker"
+        private const val MAX_SUPABASE_RETRY_ATTEMPTS = 3
         const val CHANNEL_ID = "speedtest_channel"
         const val NOTIFICATION_ID = 1001
     }
@@ -54,6 +57,16 @@ class SpeedtestWorker(
         try {
             // ForegroundService昇格（Doze中でも実行保証）
             setForeground(getForegroundInfo())
+
+            // C-2: sync-onlyモード — 未同期レコードが残っていれば計測をスキップしてsyncだけ実施
+            val unsyncedAtStart = db.speedtestDao().getUnsynced()
+            if (unsyncedAtStart.isNotEmpty()) {
+                Log.i(TAG, "sync-only mode: ${unsyncedAtStart.size} unsynced records found, skipping measurement")
+                syncToSupabase(db)
+                syncWorkerLogsToSupabase(db)
+                recordWorkerLog(db, eventType = "complete", result = "sync_only", durationMs = System.currentTimeMillis() - startedAt)
+                return@withContext Result.success()
+            }
 
             val networkType = NetworkTypeDetector(applicationContext).detect()
             val cellularCollector = CellularInfoCollector(applicationContext)
@@ -149,7 +162,7 @@ class SpeedtestWorker(
             db.speedtestDao().insert(entity)
 
             // 5. Supabase送信（未同期分まとめて）
-            syncToSupabase(db)
+            val syncOutcome = syncToSupabase(db)
             recordWorkerLog(
                 db = db,
                 eventType = "complete",
@@ -158,6 +171,10 @@ class SpeedtestWorker(
             )
             syncWorkerLogsToSupabase(db)
 
+            // C-2: sync失敗でもResult.retry()は使わない。次回の定期実行で再送する。
+            if (syncOutcome.shouldRetry) {
+                Log.w(TAG, "Transient Supabase error, will retry on next scheduled run: ${syncOutcome.logMessage}")
+            }
             Result.success()
         } catch (e: SpeedtestExecutionException) {
             val durationMs = System.currentTimeMillis() - startedAt
@@ -165,20 +182,30 @@ class SpeedtestWorker(
             recordWorkerLog(db, eventType = "complete", result = "fail", durationMs = durationMs)
             recordWorkerLog(db, eventType = "fail", errorReason = errorReason, durationMs = durationMs)
             syncWorkerLogsToSupabase(db)
-            Log.w(TAG, "CLI execution failed, will retry: ${e.message}")
-            Result.retry()
+            if (canRetryWorker()) {
+                Log.w(TAG, "CLI execution failed, will retry: ${e.message}")
+                Result.retry()
+            } else {
+                Log.e(TAG, "CLI execution retry limit reached: ${e.message}")
+                Result.failure()
+            }
         } catch (e: Exception) {
             val durationMs = System.currentTimeMillis() - startedAt
             val errorReason = classifyErrorReason(e)
             recordWorkerLog(db, eventType = "complete", result = "fail", durationMs = durationMs)
             recordWorkerLog(db, eventType = "fail", errorReason = errorReason, durationMs = durationMs)
             syncWorkerLogsToSupabase(db)
-            Log.e(TAG, "Unexpected error, will retry: ${e.message}")
-            Result.retry()
+            if (canRetryWorker()) {
+                Log.e(TAG, "Unexpected error, will retry: ${e.message}")
+                Result.retry()
+            } else {
+                Log.e(TAG, "Unexpected error retry limit reached: ${e.message}")
+                Result.failure()
+            }
         }
     }
 
-    private suspend fun syncToSupabase(db: SpeedtestDatabase) {
+    private suspend fun syncToSupabase(db: SpeedtestDatabase): SyncOutcome {
         val settings = SettingsRepository(applicationContext)
         val deviceId = DeviceIdentifier.getId(applicationContext)
         val deviceName = settings.getDeviceName()
@@ -244,15 +271,28 @@ class SpeedtestWorker(
                     "bg_app_count" to result.bgAppCount
                 )
 
-                if (client.postResult(payload)) {
-                    db.speedtestDao().markAsSynced(result.id)
-                    Log.i(TAG, "Synced result id=${result.id} to Supabase")
-                } else {
-                    Log.w(TAG, "Failed to sync result id=${result.id} to Supabase, will retry next time")
+                when (val postResult = client.postResult(payload)) {
+                    SupabasePostResult.Success -> {
+                        db.speedtestDao().markAsSynced(result.id)
+                        Log.i(TAG, "Synced result id=${result.id} to Supabase")
+                    }
+                    is SupabasePostResult.Failure -> {
+                        val detail = formatSupabaseFailure(postResult)
+                        if (postResult.kind == SupabaseFailureKind.TRANSIENT) {
+                            Log.w(TAG, "Transient Supabase failure for result id=${result.id}: $detail")
+                            return SyncOutcome(shouldRetry = true, logMessage = detail)
+                        } else {
+                            // C-1: FATALエラーは該当レコードをsyncFailed=trueにしてスキップ（永久ブロック防止）
+                            Log.e(TAG, "Fatal Supabase failure for result id=${result.id}, marking as sync_failed: $detail")
+                            db.speedtestDao().markAsSyncFailed(result.id)
+                        }
+                    }
                 }
             }
+            return SyncOutcome()
         } catch (e: Exception) {
             Log.e(TAG, "syncToSupabase error: ${e.message}")
+            return SyncOutcome(shouldRetry = true, logMessage = e.message)
         }
     }
 
@@ -289,14 +329,28 @@ class SpeedtestWorker(
                     "duration_ms" to log.durationMs,
                     "app_type" to "android"
                 )
-                if (client.postDiagnostic(payload)) {
-                    db.workerLogDao().markAsSynced(log.id)
+                when (client.postDiagnostic(payload)) {
+                    SupabasePostResult.Success -> db.workerLogDao().markAsSynced(log.id)
+                    is SupabasePostResult.Failure -> Unit
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "syncWorkerLogsToSupabase error: ${e.message}")
         }
     }
+
+    private fun canRetryWorker(): Boolean = runAttemptCount < MAX_SUPABASE_RETRY_ATTEMPTS
+
+    private fun formatSupabaseFailure(failure: SupabasePostResult.Failure): String {
+        val code = failure.httpCode?.toString() ?: "n/a"
+        val message = failure.message ?: "unknown"
+        return "kind=${failure.kind} httpCode=$code message=$message"
+    }
+
+    private data class SyncOutcome(
+        val shouldRetry: Boolean = false,
+        val logMessage: String? = null
+    )
 
     private fun classifyErrorReason(error: Throwable): String {
         val message = error.message?.lowercase().orEmpty()

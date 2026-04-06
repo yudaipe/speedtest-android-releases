@@ -50,41 +50,6 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Google Forms設定", style = MaterialTheme.typography.titleMedium)
-
-        OutlinedTextField(
-            value = state.formUrl,
-            onValueChange = viewModel::setFormUrl,
-            label = { Text("Form URL") },
-            placeholder = { Text("https://docs.google.com/forms/d/.../formResponse") }
-        )
-
-        Divider(modifier = Modifier.padding(vertical = 8.dp))
-        Text("Entry ID設定（上級設定）", style = MaterialTheme.typography.titleSmall)
-        Text("フォームフィールドのentry.XXXXXXXXXXを入力", style = MaterialTheme.typography.bodySmall)
-
-        val entryFields = listOf(
-            Triple("Timestamp", state.entryTimestamp, viewModel::setEntryTimestamp),
-            Triple("Device ID", state.entryDeviceId, viewModel::setEntryDeviceId),
-            Triple("Device Name", state.entryDeviceName, viewModel::setEntryDeviceName),
-            Triple("Download (Mbps)", state.entryDownload, viewModel::setEntryDownload),
-            Triple("Upload (Mbps)", state.entryUpload, viewModel::setEntryUpload),
-            Triple("Ping (ms)", state.entryPing, viewModel::setEntryPing),
-            Triple("Jitter (ms)", state.entryJitter, viewModel::setEntryJitter),
-            Triple("ISP", state.entryIsp, viewModel::setEntryIsp),
-            Triple("Server Name", state.entryServerName, viewModel::setEntryServerName),
-            Triple("Server ID", state.entryServerId, viewModel::setEntryServerId),
-        )
-        entryFields.forEach { (label, value, onChange) ->
-            OutlinedTextField(
-                value = value,
-                onValueChange = onChange,
-                label = { Text(label) },
-                placeholder = { Text("entry.XXXXXXXXXX") }
-            )
-        }
-
-        Divider(modifier = Modifier.padding(vertical = 16.dp))
         Text("端末設定", style = MaterialTheme.typography.titleMedium)
 
         OutlinedTextField(
