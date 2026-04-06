@@ -44,6 +44,15 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+
+    // エクスポート結果をToastで表示
+    state.exportResult?.let { msg ->
+        LaunchedEffect(msg) {
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            viewModel.clearExportResult()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -75,7 +84,16 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         SyncStatusCard(state.unsyncedCount)
 
         Divider(modifier = Modifier.padding(vertical = 16.dp))
-        val context = LocalContext.current
+        Text("データ管理", style = MaterialTheme.typography.titleMedium)
+        Button(
+            onClick = { viewModel.exportCsv() },
+            enabled = !state.isExporting,
+            modifier = Modifier.padding(top = 8.dp)
+        ) {
+            Text(if (state.isExporting) "エクスポート中..." else "データエクスポート")
+        }
+
+        Divider(modifier = Modifier.padding(vertical = 16.dp))
         val versionName = remember {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }

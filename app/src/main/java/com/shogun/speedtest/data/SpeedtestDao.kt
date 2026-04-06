@@ -25,4 +25,7 @@ interface SpeedtestDao {
 
     @Query("SELECT * FROM speedtest_results ORDER BY timestamp DESC LIMIT 5")
     fun getRecentFlow(): Flow<List<SpeedtestResult>>
+
+    @Query("SELECT * FROM speedtest_results ORDER BY timestamp ASC")
+    suspend fun getAll(): List<SpeedtestResult>
 }
