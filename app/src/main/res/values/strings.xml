@@ -3,4 +3,11 @@
     <string name="app_name">Speedtest Monitor</string>
     <string name="btn_run_speedtest">手動実行</string>
     <string name="result_placeholder">ここに結果が表示されます</string>
+    <string name="location_rationale_title">位置情報の許可が必要です</string>
+    <string name="location_rationale_message">より正確な通信エリアの判定のために位置情報が必要です。次の画面で「許可」を選択してください。</string>
+    <string name="location_rationale_ok">許可する</string>
+    <string name="location_rationale_cancel">後で</string>
+    <string name="location_settings_title">位置情報が拒否されています</string>
+    <string name="location_settings_message">位置情報の許可が拒否されました。正確な通信エリアの判定のために、設定から位置情報を許可してください。</string>
+    <string name="location_settings_open">設定を開く</string>
 </resources>

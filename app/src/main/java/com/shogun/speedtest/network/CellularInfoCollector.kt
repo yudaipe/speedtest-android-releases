@@ -153,7 +153,7 @@ class CellularInfoCollector(private val context: Context) {
             networkType = getNetworkType(telephonyManager),
             carrierName = telephonyManager.networkOperatorName?.takeIf { it.isNotBlank() },
             apn = getApn(),
-            isCarrierAggregation = getIsCarrierAggregation(telephonyManager),
+            isCarrierAggregation = getIsCarrierAggregation(telephonyManager, activeTransport),
             isCa = getIsCa(telephonyManager, activeTransport),
             caBandwidthMhz = getCaBandwidthMhz(telephonyManager),
             caBandConfig = getCaBandConfig(telephonyManager),
@@ -329,24 +329,41 @@ class CellularInfoCollector(private val context: Context) {
         }
     }
 
-    private fun getIsCarrierAggregation(telephonyManager: TelephonyManager): Boolean? {
-        val bands = getCaBandConfig(telephonyManager)
-        if (!bands.isNullOrBlank() && bands.contains("+")) return true
-        val bandwidth = getCaBandwidthMhz(telephonyManager)
-        return bandwidth?.let { it > 20 }
+    private fun getIsCarrierAggregation(
+        telephonyManager: TelephonyManager,
+        activeTransport: ActiveTransport = getActiveTransport()
+    ): Boolean? {
+        return when (getIsCa(telephonyManager, activeTransport)) {
+            "yes" -> true
+            "no" -> false
+            else -> null
+        }
     }
 
+    @SuppressLint("MissingPermission")
     private fun getIsCa(
         telephonyManager: TelephonyManager,
         activeTransport: ActiveTransport = getActiveTransport()
     ): String? {
         return when (activeTransport) {
             ActiveTransport.WIFI -> "-"
-            ActiveTransport.CELLULAR -> {
-                val registeredCount = getRegisteredCellCount(telephonyManager) ?: return null
-                if (registeredCount >= 2) "yes" else "no"
-            }
             ActiveTransport.OTHER -> null
+            ActiveTransport.CELLULAR -> {
+                // getAllCellInfo() が null なら判定不能（権限なし等）
+                val cells = getAllCellInfo(telephonyManager)
+                if (cells == null) return null
+
+                // 優先1: CONNECTION_SECONDARY_SERVING (公開API, API28+)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                    cells.any { it.cellConnectionStatus == CellInfo.CONNECTION_SECONDARY_SERVING }) {
+                    return "yes"
+                }
+                // 優先2: caBandConfig に "+" が含まれるか
+                val bands = getCaBandConfig(telephonyManager)
+                if (!bands.isNullOrBlank() && bands.contains("+")) return "yes"
+                // CellInfo取得成功、かつCA条件なし → "no"
+                "no"
+            }
         }
     }
 

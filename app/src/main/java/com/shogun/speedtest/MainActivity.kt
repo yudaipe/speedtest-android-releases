@@ -60,6 +60,14 @@ class MainActivity : ComponentActivity() {
         viewModel.locationPermissionMissing.value = !granted
         if (granted) {
             requestBackgroundLocationIfNeeded()
+        } else {
+            // shouldShowRationale=false かつ未許可 → 永久拒否 → 設定画面誘導
+            val showRationale = shouldShowRequestPermissionRationale(
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            )
+            if (!showRationale) {
+                showLocationPermissionSettingsDialog()
+            }
         }
     }
 
@@ -136,15 +144,48 @@ class MainActivity : ComponentActivity() {
     private fun requestLocationPermissionIfNeeded() {
         val granted = ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            locationPermissionRequest.launch(arrayOf(
+        when {
+            granted -> requestBackgroundLocationIfNeeded()
+            shouldShowRequestPermissionRationale(android.Manifest.permission.ACCESS_FINE_LOCATION) ->
+                showLocationPermissionRationaleDialog()
+            else -> locationPermissionRequest.launch(arrayOf(
                 android.Manifest.permission.ACCESS_FINE_LOCATION,
                 android.Manifest.permission.ACCESS_COARSE_LOCATION
             ))
-        } else {
-            requestBackgroundLocationIfNeeded()
         }
         viewModel.locationPermissionMissing.value = !granted
+    }
+
+    private fun showLocationPermissionRationaleDialog() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.location_rationale_title))
+            .setMessage(getString(R.string.location_rationale_message))
+            .setPositiveButton(getString(R.string.location_rationale_ok)) { _, _ ->
+                locationPermissionRequest.launch(arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                ))
+            }
+            .setNegativeButton(getString(R.string.location_rationale_cancel)) { dialog, _ ->
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun showLocationPermissionSettingsDialog() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.location_settings_title))
+            .setMessage(getString(R.string.location_settings_message))
+            .setPositiveButton(getString(R.string.location_settings_open)) { _, _ ->
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            }
+            .setNegativeButton(getString(R.string.location_rationale_cancel)) { dialog, _ ->
+                dialog.dismiss()
+            }
+            .show()
     }
 
     private fun requestBackgroundLocationIfNeeded() {
