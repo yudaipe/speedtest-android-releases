@@ -349,24 +349,7 @@ class CellularInfoCollector(private val context: Context) {
             ActiveTransport.WIFI -> "-"
             ActiveTransport.OTHER -> null
             ActiveTransport.CELLULAR -> {
-                // 優先1: PhysicalChannelConfig API (API 28+) — 信頼性が高い yes/no 判定
-                // getPhysicalChannelConfigs() は隠しAPIのためreflectionで呼び出す
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    try {
-                        val method = telephonyManager.javaClass
-                            .getMethod("getPhysicalChannelConfigs")
-                        @Suppress("UNCHECKED_CAST")
-                        val configs = method.invoke(telephonyManager) as? List<*>
-                        val count = configs?.size ?: 0
-                        if (count >= 2) return "yes"
-                        if (count == 1) return "no"
-                    } catch (_: SecurityException) {
-                        // 権限なし → 次の優先度へ
-                    } catch (_: Exception) {
-                        // 隠しAPI制限・API失敗 → 次の優先度へ
-                    }
-                }
-                // 優先2: CONNECTION_SECONDARY_SERVING → yes のみ（見つからなくても no とは断言しない）
+                // 優先1: CONNECTION_SECONDARY_SERVING (公開API, API28+) → yes のみ（見つからなくても no とは断言しない）
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     val cells = getAllCellInfo(telephonyManager)
                     if (cells != null &&
@@ -374,10 +357,10 @@ class CellularInfoCollector(private val context: Context) {
                         return "yes"
                     }
                 }
-                // 優先3: caBandConfig に '+' → yes のみ（10MHz+10MHz の 2CA も検出可能）
+                // 優先2: caBandConfig に '+' → yes のみ（10MHz+10MHz の 2CA も検出可能）
                 val bands = getCaBandConfig(telephonyManager)
                 if (!bands.isNullOrBlank() && bands.contains("+")) return "yes"
-                // 優先4: 判定不能 → null（無理に推定しない）
+                // 優先3: 判定不能 → null（無理に推定しない）
                 null
             }
         }
