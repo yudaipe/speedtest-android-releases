@@ -349,19 +349,20 @@ class CellularInfoCollector(private val context: Context) {
             ActiveTransport.WIFI -> "-"
             ActiveTransport.OTHER -> null
             ActiveTransport.CELLULAR -> {
-                // 優先1: CONNECTION_SECONDARY_SERVING (公開API, API28+) → yes のみ（見つからなくても no とは断言しない）
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    val cells = getAllCellInfo(telephonyManager)
-                    if (cells != null &&
-                        cells.any { it.cellConnectionStatus == CellInfo.CONNECTION_SECONDARY_SERVING }) {
-                        return "yes"
-                    }
+                // getAllCellInfo() が null なら判定不能（権限なし等）
+                val cells = getAllCellInfo(telephonyManager)
+                if (cells == null) return null
+
+                // 優先1: CONNECTION_SECONDARY_SERVING (公開API, API28+)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                    cells.any { it.cellConnectionStatus == CellInfo.CONNECTION_SECONDARY_SERVING }) {
+                    return "yes"
                 }
-                // 優先2: caBandConfig に '+' → yes のみ（10MHz+10MHz の 2CA も検出可能）
+                // 優先2: caBandConfig に "+" が含まれるか
                 val bands = getCaBandConfig(telephonyManager)
                 if (!bands.isNullOrBlank() && bands.contains("+")) return "yes"
-                // 優先3: 判定不能 → null（無理に推定しない）
-                null
+                // CellInfo取得成功、かつCA条件なし → "no"
+                "no"
             }
         }
     }
