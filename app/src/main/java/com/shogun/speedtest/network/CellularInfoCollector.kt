@@ -153,7 +153,7 @@ class CellularInfoCollector(private val context: Context) {
             networkType = getNetworkType(telephonyManager),
             carrierName = telephonyManager.networkOperatorName?.takeIf { it.isNotBlank() },
             apn = getApn(),
-            isCarrierAggregation = getIsCarrierAggregation(telephonyManager),
+            isCarrierAggregation = getIsCarrierAggregation(telephonyManager, activeTransport),
             isCa = getIsCa(telephonyManager, activeTransport),
             caBandwidthMhz = getCaBandwidthMhz(telephonyManager),
             caBandConfig = getCaBandConfig(telephonyManager),
@@ -329,24 +329,57 @@ class CellularInfoCollector(private val context: Context) {
         }
     }
 
-    private fun getIsCarrierAggregation(telephonyManager: TelephonyManager): Boolean? {
-        val bands = getCaBandConfig(telephonyManager)
-        if (!bands.isNullOrBlank() && bands.contains("+")) return true
-        val bandwidth = getCaBandwidthMhz(telephonyManager)
-        return bandwidth?.let { it > 20 }
+    private fun getIsCarrierAggregation(
+        telephonyManager: TelephonyManager,
+        activeTransport: ActiveTransport = getActiveTransport()
+    ): Boolean? {
+        return when (getIsCa(telephonyManager, activeTransport)) {
+            "yes" -> true
+            "no" -> false
+            else -> null
+        }
     }
 
+    @SuppressLint("MissingPermission")
     private fun getIsCa(
         telephonyManager: TelephonyManager,
         activeTransport: ActiveTransport = getActiveTransport()
     ): String? {
         return when (activeTransport) {
             ActiveTransport.WIFI -> "-"
-            ActiveTransport.CELLULAR -> {
-                val registeredCount = getRegisteredCellCount(telephonyManager) ?: return null
-                if (registeredCount >= 2) "yes" else "no"
-            }
             ActiveTransport.OTHER -> null
+            ActiveTransport.CELLULAR -> {
+                // 優先1: PhysicalChannelConfig API (API 28+) — 信頼性が高い yes/no 判定
+                // getPhysicalChannelConfigs() は隠しAPIのためreflectionで呼び出す
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    try {
+                        val method = telephonyManager.javaClass
+                            .getMethod("getPhysicalChannelConfigs")
+                        @Suppress("UNCHECKED_CAST")
+                        val configs = method.invoke(telephonyManager) as? List<*>
+                        val count = configs?.size ?: 0
+                        if (count >= 2) return "yes"
+                        if (count == 1) return "no"
+                    } catch (_: SecurityException) {
+                        // 権限なし → 次の優先度へ
+                    } catch (_: Exception) {
+                        // 隠しAPI制限・API失敗 → 次の優先度へ
+                    }
+                }
+                // 優先2: CONNECTION_SECONDARY_SERVING → yes のみ（見つからなくても no とは断言しない）
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val cells = getAllCellInfo(telephonyManager)
+                    if (cells != null &&
+                        cells.any { it.cellConnectionStatus == CellInfo.CONNECTION_SECONDARY_SERVING }) {
+                        return "yes"
+                    }
+                }
+                // 優先3: caBandConfig に '+' → yes のみ（10MHz+10MHz の 2CA も検出可能）
+                val bands = getCaBandConfig(telephonyManager)
+                if (!bands.isNullOrBlank() && bands.contains("+")) return "yes"
+                // 優先4: 判定不能 → null（無理に推定しない）
+                null
+            }
         }
     }
 
