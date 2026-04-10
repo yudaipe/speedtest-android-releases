@@ -12,7 +12,7 @@ android {
         applicationId = "com.shogun.speedtest"
         minSdk = 26
         targetSdk = 34
-        versionCode = 37
+        versionCode = 39
         versionName = "2.5.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
