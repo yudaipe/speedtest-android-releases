@@ -12,8 +12,8 @@ android {
         applicationId = "com.shogun.speedtest"
         minSdk = 26
         targetSdk = 34
-        versionCode = 40
-        versionName = "2.5.3"
+        versionCode = 41
+        versionName = "2.6.0-rc1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -103,6 +103,8 @@ dependencies {
 
     // Lifecycle
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+
+    implementation("com.shogun.speedtest:common:1.0.0")
 
     testImplementation("junit:junit:4.13.2")
 }
