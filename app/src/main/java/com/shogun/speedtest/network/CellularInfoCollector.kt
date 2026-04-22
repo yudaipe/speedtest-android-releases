@@ -19,6 +19,7 @@ import android.telephony.CellSignalStrengthLte
 import android.telephony.PhoneStateListener
 import android.telephony.SignalStrength
 import android.telephony.SubscriptionManager
+import android.telephony.TelephonyDisplayInfo
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
@@ -64,10 +65,40 @@ private data class RsrpSamplingStats(
 
 class CellularInfoCollector(private val context: Context) {
 
-    private enum class ActiveTransport {
+    internal enum class ActiveTransport {
         CELLULAR,
         WIFI,
         OTHER
+    }
+
+    companion object {
+        private val CA_OVERRIDE_NETWORK_TYPES = setOf(
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_CA,
+            TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_ADVANCED_PRO
+        )
+
+        internal fun determineIsCa(
+            activeTransport: ActiveTransport,
+            overrideNetworkType: Int,
+            hasSecondaryServingCell: Boolean,
+            caBandConfig: String?,
+            supportsDisplayInfoOverride: Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        ): String? {
+            return when (activeTransport) {
+                ActiveTransport.WIFI -> "-"
+                ActiveTransport.OTHER -> null
+                ActiveTransport.CELLULAR -> {
+                    // PhysicalChannelConfig directly requires READ_PRIVILEGED_PHONE_STATE, so it is not used here.
+                    if (supportsDisplayInfoOverride &&
+                        overrideNetworkType in CA_OVERRIDE_NETWORK_TYPES) {
+                        return "yes"
+                    }
+                    if (hasSecondaryServingCell) return "yes"
+                    if (!caBandConfig.isNullOrBlank() && caBandConfig.contains("+")) return "yes"
+                    "no"
+                }
+            }
+        }
     }
 
     private var handoverCount = 0
@@ -75,10 +106,12 @@ class CellularInfoCollector(private val context: Context) {
     private var listener: PhoneStateListener? = null
     private var telephonyCallback: TrackingTelephonyCallback? = null
     private var lastServingCellKey: String? = null
+    private var overrideNetworkType: Int = TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE
 
     fun startTracking() {
         if (!isCellularActiveNetwork()) return
         if (!hasReadPhoneStatePermission()) return
+        overrideNetworkType = TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE
         val telephonyManager = resolveTelephonyManager()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val callback = TrackingTelephonyCallback(telephonyManager)
@@ -100,13 +133,26 @@ class CellularInfoCollector(private val context: Context) {
                         firstCellLocationObserved = true
                     }
                 }
+
+                override fun onDisplayInfoChanged(telephonyDisplayInfo: TelephonyDisplayInfo) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        overrideNetworkType =
+                            telephonyDisplayInfo.overrideNetworkType
+                    }
+                }
             }
             listener = phoneStateListener
             try {
                 @Suppress("DEPRECATION")
                 telephonyManager.listen(
                     phoneStateListener,
-                    PhoneStateListener.LISTEN_SIGNAL_STRENGTHS or PhoneStateListener.LISTEN_CELL_LOCATION
+                    PhoneStateListener.LISTEN_SIGNAL_STRENGTHS or
+                        PhoneStateListener.LISTEN_CELL_LOCATION or
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            PhoneStateListener.LISTEN_DISPLAY_INFO_CHANGED
+                        } else {
+                            0
+                        }
                 )
             } catch (_: Exception) {
                 listener = null
@@ -119,11 +165,13 @@ class CellularInfoCollector(private val context: Context) {
         if (activeTransport != ActiveTransport.CELLULAR) {
             listener = null
             telephonyCallback = null
+            overrideNetworkType = TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE
             return CellularInfo(
                 networkType = if (activeTransport == ActiveTransport.WIFI) "WIFI" else null
             )
         }
         val telephonyManager = resolveTelephonyManager()
+        val currentOverrideNetworkType = overrideNetworkType
         listener?.let {
             try {
                 @Suppress("DEPRECATION")
@@ -140,6 +188,9 @@ class CellularInfoCollector(private val context: Context) {
         listener = null
         telephonyCallback = null
         val rsrpStats = calculateRsrpSamplingStats(collectRsrpSamples(telephonyManager))
+        val caBandConfig = getCaBandConfig(telephonyManager)
+        val isCa = getIsCa(telephonyManager, activeTransport, currentOverrideNetworkType, caBandConfig)
+        overrideNetworkType = TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE
 
         return CellularInfo(
             rsrpDbm = rsrpStats.meanDbm,
@@ -154,9 +205,9 @@ class CellularInfoCollector(private val context: Context) {
             carrierName = telephonyManager.networkOperatorName?.takeIf { it.isNotBlank() },
             apn = getApn(),
             isCarrierAggregation = getIsCarrierAggregation(telephonyManager, activeTransport),
-            isCa = getIsCa(telephonyManager, activeTransport),
+            isCa = isCa,
             caBandwidthMhz = getCaBandwidthMhz(telephonyManager),
-            caBandConfig = getCaBandConfig(telephonyManager),
+            caBandConfig = caBandConfig,
             nrState = getNrState(telephonyManager),
             mcc = getMcc(telephonyManager),
             mnc = getMnc(telephonyManager),
@@ -333,7 +384,7 @@ class CellularInfoCollector(private val context: Context) {
         telephonyManager: TelephonyManager,
         activeTransport: ActiveTransport = getActiveTransport()
     ): Boolean? {
-        return when (getIsCa(telephonyManager, activeTransport)) {
+        return when (getIsCa(telephonyManager, activeTransport, overrideNetworkType)) {
             "yes" -> true
             "no" -> false
             else -> null
@@ -343,7 +394,9 @@ class CellularInfoCollector(private val context: Context) {
     @SuppressLint("MissingPermission")
     private fun getIsCa(
         telephonyManager: TelephonyManager,
-        activeTransport: ActiveTransport = getActiveTransport()
+        activeTransport: ActiveTransport = getActiveTransport(),
+        overrideNetworkType: Int = this.overrideNetworkType,
+        caBandConfig: String? = getCaBandConfig(telephonyManager)
     ): String? {
         return when (activeTransport) {
             ActiveTransport.WIFI -> "-"
@@ -353,16 +406,13 @@ class CellularInfoCollector(private val context: Context) {
                 val cells = getAllCellInfo(telephonyManager)
                 if (cells == null) return null
 
-                // 優先1: CONNECTION_SECONDARY_SERVING (公開API, API28+)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-                    cells.any { it.cellConnectionStatus == CellInfo.CONNECTION_SECONDARY_SERVING }) {
-                    return "yes"
-                }
-                // 優先2: caBandConfig に "+" が含まれるか
-                val bands = getCaBandConfig(telephonyManager)
-                if (!bands.isNullOrBlank() && bands.contains("+")) return "yes"
-                // CellInfo取得成功、かつCA条件なし → "no"
-                "no"
+                determineIsCa(
+                    activeTransport = activeTransport,
+                    overrideNetworkType = overrideNetworkType,
+                    hasSecondaryServingCell = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                        cells.any { it.cellConnectionStatus == CellInfo.CONNECTION_SECONDARY_SERVING },
+                    caBandConfig = caBandConfig
+                )
             }
         }
     }
@@ -732,7 +782,8 @@ class CellularInfoCollector(private val context: Context) {
         private val telephonyManager: TelephonyManager
     ) : TelephonyCallback(),
         TelephonyCallback.SignalStrengthsListener,
-        TelephonyCallback.CellInfoListener {
+        TelephonyCallback.CellInfoListener,
+        TelephonyCallback.DisplayInfoListener {
 
         override fun onSignalStrengthsChanged(signalStrength: SignalStrength) {
             updateServingCellState(getAllCellInfo(telephonyManager))
@@ -740,6 +791,10 @@ class CellularInfoCollector(private val context: Context) {
 
         override fun onCellInfoChanged(cellInfo: MutableList<CellInfo>) {
             updateServingCellState(cellInfo)
+        }
+
+        override fun onDisplayInfoChanged(telephonyDisplayInfo: TelephonyDisplayInfo) {
+            overrideNetworkType = telephonyDisplayInfo.overrideNetworkType
         }
     }
 }
