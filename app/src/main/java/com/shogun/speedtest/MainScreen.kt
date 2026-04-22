@@ -3,6 +3,7 @@ package com.shogun.speedtest
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.animation.core.*
 import com.shogun.speedtest.update.UpdateDownloader
 import androidx.compose.foundation.Canvas
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.shogun.speedtest.data.SpeedtestResult
 import com.shogun.speedtest.ui.SettingsActivity
+import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -46,6 +48,7 @@ private val TextSecondary = Color(0xFF9E9E9E)
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val isMeasuring by viewModel.isMeasuring.collectAsState()
     val latestResult by viewModel.latestResult.collectAsState()
     val history by viewModel.history.collectAsState()
@@ -236,9 +239,19 @@ fun MainScreen(viewModel: MainViewModel) {
             text = { Text(info.releaseNotes.ifEmpty { "新しいバージョンが利用可能です" }) },
             confirmButton = {
                 TextButton(onClick = {
-                    val downloader = UpdateDownloader(context)
-                    downloader.downloadApk(info.apkUrl, info.versionName)
-                    viewModel.dismissUpdate()
+                    scope.launch {
+                        UpdateDownloader(context).downloadApk(
+                            apkUrl = info.apkUrl,
+                            versionName = info.versionName,
+                            sha256Expected = info.sha256,
+                            onProgress = {},
+                            onInstalling = {},
+                            onComplete = { viewModel.dismissUpdate() },
+                            onError = { message ->
+                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    }
                 }) { Text("ダウンロード") }
             },
             dismissButton = {

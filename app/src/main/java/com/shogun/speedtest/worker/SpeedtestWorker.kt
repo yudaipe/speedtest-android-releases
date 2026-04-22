@@ -235,7 +235,10 @@ class SpeedtestWorker(
             applicationContext.packageManager.getPackageInfo(applicationContext.packageName, 0).versionName ?: "unknown"
         } catch (e: Exception) { "unknown" }
         try {
-            val client = SupabaseClient()
+            val client = SupabaseClient(
+                supabaseUrl = settings.getSupabaseUrl(),
+                anonKey = settings.getSupabaseAnonKey()
+            )
             val unsynced = db.speedtestDao().getUnsynced()
             for (result in unsynced) {
                 val payload: Map<String, Any?> = mapOf(
@@ -341,7 +344,11 @@ class SpeedtestWorker(
 
     private suspend fun syncWorkerLogsToSupabase(db: SpeedtestDatabase) {
         try {
-            val client = SupabaseClient()
+            val settings = SettingsRepository(applicationContext)
+            val client = SupabaseClient(
+                supabaseUrl = settings.getSupabaseUrl(),
+                anonKey = settings.getSupabaseAnonKey()
+            )
             val unsynced = db.workerLogDao().getUnsynced()
             for (log in unsynced) {
                 val payload = mapOf(

@@ -1,7 +1,6 @@
 package com.shogun.speedtest.ui
 
 import android.Manifest
-import android.app.DownloadManager
 import android.content.Context
 import android.os.Build
 import android.os.PowerManager
@@ -27,7 +26,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -41,7 +39,6 @@ import com.shogun.speedtest.update.UpdateChecker
 import com.shogun.speedtest.update.UpdateDownloader
 import com.shogun.speedtest.update.UpdateInfo
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -126,34 +123,8 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
         var isDownloading by remember { mutableStateOf(false) }
         var downloadProgress by remember { mutableFloatStateOf(0f) }
-        var activeDownloadId by remember { mutableLongStateOf(-1L) }
         var downloadError by remember { mutableStateOf<String?>(null) }
         val scope = rememberCoroutineScope()
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-
-        // ダウンロード進捗ポーリング
-        LaunchedEffect(activeDownloadId) {
-            if (activeDownloadId < 0) return@LaunchedEffect
-            while (isDownloading) {
-                val query = DownloadManager.Query().setFilterById(activeDownloadId)
-                val cursor = dm.query(query)
-                cursor.use {
-                    if (it.moveToFirst()) {
-                        val downloaded = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
-                        val total = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
-                        if (total > 0) {
-                            downloadProgress = downloaded.toFloat() / total.toFloat()
-                        }
-                        val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                        if (status == DownloadManager.STATUS_SUCCESSFUL ||
-                            status == DownloadManager.STATUS_FAILED) {
-                            isDownloading = false
-                        }
-                    }
-                }
-                delay(500)
-            }
-        }
 
         // ダウンロード進捗ダイアログ
         if (isDownloading) {
@@ -172,14 +143,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                     }
                 },
                 confirmButton = {},
-                dismissButton = {
-                    TextButton(onClick = {
-                        dm.remove(activeDownloadId)
-                        isDownloading = false
-                        activeDownloadId = -1L
-                        downloadProgress = 0f
-                    }) { Text("キャンセル") }
-                }
+                dismissButton = {}
             )
         }
 
@@ -206,15 +170,28 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
                         updateInfo = null
                         isDownloading = true
                         downloadProgress = 0f
-                        val id = UpdateDownloader(context).downloadApk(
-                            apkUrl = info.apkUrl,
-                            versionName = info.versionName,
-                            onError = { msg ->
-                                isDownloading = false
-                                downloadError = msg
-                            }
-                        )
-                        activeDownloadId = id
+                        scope.launch {
+                            UpdateDownloader(context).downloadApk(
+                                apkUrl = info.apkUrl,
+                                versionName = info.versionName,
+                                sha256Expected = info.sha256,
+                                onProgress = { progress ->
+                                    downloadProgress = progress
+                                },
+                                onInstalling = {
+                                    isDownloading = false
+                                    Toast.makeText(context, "インストールを開始します", Toast.LENGTH_SHORT).show()
+                                },
+                                onComplete = {
+                                    isDownloading = false
+                                    downloadProgress = 1f
+                                },
+                                onError = { msg ->
+                                    isDownloading = false
+                                    downloadError = msg
+                                }
+                            )
+                        }
                     }) { Text("ダウンロード") }
                 },
                 dismissButton = {
