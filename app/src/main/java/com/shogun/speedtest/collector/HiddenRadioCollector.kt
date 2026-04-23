@@ -7,25 +7,34 @@ import android.telephony.PhysicalChannelConfig
 import android.telephony.TelephonyManager
 import com.shogun.speedtest.data.CarrierInfo
 import com.shogun.speedtest.data.HiddenRadioSnapshot
+import com.shogun.speedtest.debug.HiddenRadioDebugLog
 
 class HiddenRadioCollector(private val context: Context) {
 
     @Suppress("UNCHECKED_CAST")
     fun collect(): HiddenRadioSnapshot {
+        HiddenRadioDebugLog.add("collect_start", "sdk=${Build.VERSION.SDK_INT}")
         val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
         val configs: List<PhysicalChannelConfig> = try {
             val method = TelephonyManager::class.java.getDeclaredMethod("getPhysicalChannelConfigs")
             method.isAccessible = true
             ((method.invoke(tm) as? List<PhysicalChannelConfig>) ?: emptyList()).also {
                 Log.d(TAG, "getPhysicalChannelConfigs succeeded size=${it.size}")
+                HiddenRadioDebugLog.updateRawDump(it)
             }
         } catch (e: Exception) {
             Log.w(TAG, "getPhysicalChannelConfigs failed; Shizuku permission alone does not elevate this app process", e)
+            HiddenRadioDebugLog.add(
+                event = "collect_fail",
+                detail = "${e.javaClass.simpleName}: ${e.message ?: "unknown"}",
+                stacktrace = HiddenRadioDebugLog.stacktrace(e, 5)
+            )
             emptyList()
         }
 
         val carriers = configs.map { config -> buildCarrierInfo(config) }
         Log.d(TAG, "collect mapped carrierCount=${carriers.size}")
+        HiddenRadioDebugLog.add("collect_success", "configs=${configs.size}")
         return HiddenRadioSnapshot(componentCarriers = carriers)
     }
 
