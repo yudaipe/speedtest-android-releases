@@ -72,7 +72,7 @@ class HiddenRadioCollector(private val context: Context) {
         telephonyManager: TelephonyManager
     ): List<PhysicalChannelConfig> {
         HiddenRadioDebugLog.add("collect_path", "listener sdk=${Build.VERSION.SDK_INT}")
-        collectViaPrivilegedBinder(telephonyManager)?.let { return it }
+        collectViaPrivilegedBinder()?.let { return it }
         HiddenRadioDebugLog.add(
             "privileged_context",
             "binder wrap unavailable; falling back to app-side TelephonyManager"
@@ -117,9 +117,7 @@ class HiddenRadioCollector(private val context: Context) {
         }
     }
 
-    private fun collectViaPrivilegedBinder(
-        telephonyManager: TelephonyManager
-    ): List<PhysicalChannelConfig>? {
+    private fun collectViaPrivilegedBinder(): List<PhysicalChannelConfig>? {
         val latch = CountDownLatch(1)
         val configsRef = AtomicReference<List<PhysicalChannelConfig>>(emptyList())
         val callback = PhysicalChannelConfigListenerBinder { physicalChannelConfigs ->
@@ -133,7 +131,6 @@ class HiddenRadioCollector(private val context: Context) {
             registry = createPrivilegedRegistry()
             invokeRegistryListen(
                 registry = registry,
-                telephonyManager = telephonyManager,
                 callback = callback,
                 events = intArrayOf(EVENT_PHYSICAL_CHANNEL_CONFIG_CHANGED),
                 notifyNow = true
@@ -159,7 +156,6 @@ class HiddenRadioCollector(private val context: Context) {
                 if (registry != null) {
                     invokeRegistryListen(
                         registry = registry,
-                        telephonyManager = telephonyManager,
                         callback = callback,
                         events = intArrayOf(),
                         notifyNow = false
@@ -199,44 +195,29 @@ class HiddenRadioCollector(private val context: Context) {
 
     private fun invokeRegistryListen(
         registry: PrivilegedRegistry,
-        telephonyManager: TelephonyManager,
         callback: IBinder,
         events: IntArray,
         notifyNow: Boolean
     ) {
         val featureId = context.attributionTag ?: ""
-        val subId = telephonyManager.subscriptionId
-            .takeIf { it != SubscriptionManager.INVALID_SUBSCRIPTION_ID }
-            ?: SubscriptionManager.getDefaultSubscriptionId()
+        val subId = SubscriptionManager.getDefaultSubscriptionId()
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
         try {
             data.writeInterfaceToken(TELEPHONY_REGISTRY_DESCRIPTOR)
-            when (registry.listenArity) {
-                6 -> {
-                    data.writeInt(subId)
-                    data.writeString(context.packageName)
-                    data.writeString(featureId)
-                    data.writeStrongBinder(callback)
-                    data.writeIntArray(events)
-                    data.writeInt(if (notifyNow) 1 else 0)
-                }
-
-                8 -> {
-                    data.writeInt(0)
-                    data.writeInt(0)
-                    data.writeInt(subId)
-                    data.writeString(context.packageName)
-                    data.writeString(featureId)
-                    data.writeStrongBinder(callback)
-                    data.writeIntArray(events)
-                    data.writeInt(if (notifyNow) 1 else 0)
-                }
-
-                else -> throw IllegalStateException(
+            if (registry.listenArity != 8) {
+                throw IllegalStateException(
                     "Unsupported listenWithEventList arity=${registry.listenArity}"
                 )
             }
+            data.writeInt(0)
+            data.writeInt(0)
+            data.writeInt(subId)
+            data.writeString(context.packageName)
+            data.writeString(featureId)
+            data.writeStrongBinder(callback)
+            data.writeIntArray(events)
+            data.writeInt(if (notifyNow) 1 else 0)
             val success = registry.binder.transact(
                 TRANSACTION_LISTEN_WITH_EVENT_LIST,
                 data,
@@ -312,7 +293,7 @@ class HiddenRadioCollector(private val context: Context) {
     private companion object {
         const val TAG = "HiddenRadioCollector"
         const val LISTENER_TIMEOUT_MS = 1500L
-        const val EVENT_PHYSICAL_CHANNEL_CONFIG_CHANGED = 33
+        const val EVENT_PHYSICAL_CHANNEL_CONFIG_CHANGED = 19
         const val TELEPHONY_REGISTRY_DESCRIPTOR = "com.android.internal.telephony.ITelephonyRegistry"
         const val TRANSACTION_LISTEN_WITH_EVENT_LIST = IBinder.FIRST_CALL_TRANSACTION + 3
     }
