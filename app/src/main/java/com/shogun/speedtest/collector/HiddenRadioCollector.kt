@@ -1,5 +1,6 @@
 package com.shogun.speedtest.collector
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.os.IBinder
@@ -203,6 +204,7 @@ class HiddenRadioCollector(private val context: Context) {
             ?: throw IllegalStateException("ITelephonyRegistry unavailable")
     }
 
+    @SuppressLint("BlockedPrivateApi")
     private fun initializeTelephonyCallback(
         callback: TelephonyCallback,
         executor: java.util.concurrent.Executor
@@ -215,6 +217,7 @@ class HiddenRadioCollector(private val context: Context) {
         init.invoke(callback, executor)
     }
 
+    @SuppressLint("BlockedPrivateApi")
     private fun getTelephonyCallbackBinder(callback: TelephonyCallback): Any {
         val field = TelephonyCallback::class.java.getDeclaredField("callback")
         field.isAccessible = true
