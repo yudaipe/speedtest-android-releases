@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.shogun.speedtest.data.HiddenRadioSnapshot
 import com.shogun.speedtest.data.SpeedtestDatabase
 import com.shogun.speedtest.data.SpeedtestResult
 import com.shogun.speedtest.settings.SettingsRepository
@@ -26,7 +27,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val dao = SpeedtestDatabase.getInstance(application).speedtestDao()
     private val settingsRepo = SettingsRepository(application)
-    private val shizukuManager = ShizukuManager()
+    private val shizukuManager = ShizukuManager(application)
 
     val isMeasuring = MutableStateFlow(false)
     val latestResult = MutableStateFlow<SpeedtestResult?>(null)
@@ -40,6 +41,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateInfo = MutableStateFlow<UpdateInfo?>(null)
     val updateInfo: StateFlow<UpdateInfo?> = _updateInfo
     val shizukuState: StateFlow<ShizukuAccessState> = shizukuManager.state
+    val hiddenRadioFlow: StateFlow<HiddenRadioSnapshot?> = shizukuManager.hiddenRadioFlow
 
     val deviceName: String get() = settingsRepo.getDeviceName()
 
@@ -78,6 +80,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshShizukuState() {
         shizukuManager.refreshState()
+    }
+
+    fun refreshHiddenRadio() {
+        shizukuManager.collectHiddenRadio()
     }
 
     fun requestShizukuPermission() {

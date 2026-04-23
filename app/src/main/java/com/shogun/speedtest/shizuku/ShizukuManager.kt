@@ -1,6 +1,9 @@
 package com.shogun.speedtest.shizuku
 
+import android.content.Context
 import android.content.pm.PackageManager
+import com.shogun.speedtest.collector.HiddenRadioCollector
+import com.shogun.speedtest.data.HiddenRadioSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import rikka.shizuku.Shizuku
@@ -11,10 +14,15 @@ enum class ShizukuAccessState {
     Granted
 }
 
-class ShizukuManager {
+class ShizukuManager(private val context: Context) {
 
     private val _state = MutableStateFlow(resolveState())
     val state: StateFlow<ShizukuAccessState> = _state
+
+    private val _hiddenRadioFlow = MutableStateFlow<HiddenRadioSnapshot?>(null)
+    val hiddenRadioFlow: StateFlow<HiddenRadioSnapshot?> = _hiddenRadioFlow
+
+    private val collector by lazy { HiddenRadioCollector(context) }
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         refreshState()
@@ -38,6 +46,16 @@ class ShizukuManager {
 
     fun refreshState() {
         _state.value = resolveState()
+        if (_state.value == ShizukuAccessState.Granted) {
+            collectHiddenRadio()
+        } else {
+            _hiddenRadioFlow.value = null
+        }
+    }
+
+    fun collectHiddenRadio() {
+        if (_state.value != ShizukuAccessState.Granted) return
+        _hiddenRadioFlow.value = runCatching { collector.collect() }.getOrNull()
     }
 
     fun requestPermission() {

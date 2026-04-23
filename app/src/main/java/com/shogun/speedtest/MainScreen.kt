@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.shogun.speedtest.data.HiddenRadioSnapshot
 import com.shogun.speedtest.data.SpeedtestResult
 import com.shogun.speedtest.shizuku.ShizukuAccessState
 import com.shogun.speedtest.ui.SettingsActivity
@@ -60,6 +61,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val locationMissing by viewModel.locationPermissionMissing.collectAsState()
     val notificationMissing by viewModel.notificationPermissionMissing.collectAsState()
     val shizukuState by viewModel.shizukuState.collectAsState()
+    val hiddenRadio by viewModel.hiddenRadioFlow.collectAsState()
 
     val animatedGauge by animateFloatAsState(
         targetValue = gaugeValue,
@@ -213,7 +215,11 @@ fun MainScreen(viewModel: MainViewModel) {
 
         if (shizukuState == ShizukuAccessState.Granted) {
             Spacer(modifier = Modifier.height(8.dp))
-            HiddenRadioInfoCard(modifier = Modifier.fillMaxWidth())
+            HiddenRadioInfoCard(
+                snapshot = hiddenRadio,
+                onRefresh = { viewModel.refreshHiddenRadio() },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -358,7 +364,11 @@ private fun ShizukuStatusCard(
 }
 
 @Composable
-private fun HiddenRadioInfoCard(modifier: Modifier = Modifier) {
+private fun HiddenRadioInfoCard(
+    snapshot: HiddenRadioSnapshot?,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = CardColor)
@@ -368,24 +378,83 @@ private fun HiddenRadioInfoCard(modifier: Modifier = Modifier) {
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
-            Text(
-                text = "Hidden Radio Info",
-                color = TextPrimary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Surface(
-                color = Color(0xFF121212),
-                shape = MaterialTheme.shapes.medium,
-                tonalElevation = 0.dp
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Wave2で追加予定",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(12.dp)
+                    text = "Hidden Radio Info",
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
                 )
+                if (snapshot != null && snapshot.isCarrierAggregation) {
+                    Text(
+                        text = "CA (${snapshot.ccCount}CC)",
+                        color = AccentGreen,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            if (snapshot == null || snapshot.componentCarriers.isEmpty()) {
+                Surface(
+                    color = Color(0xFF121212),
+                    shape = MaterialTheme.shapes.medium,
+                    tonalElevation = 0.dp
+                ) {
+                    Text(
+                        text = "データ取得中...",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+                TextButton(onClick = onRefresh, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("再取得", color = AccentBlue, fontSize = 11.sp)
+                }
+            } else {
+                snapshot.componentCarriers.forEachIndexed { index, cc ->
+                    if (index > 0) Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        color = Color(0xFF121212),
+                        shape = MaterialTheme.shapes.medium,
+                        tonalElevation = 0.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val statusColor = if (cc.connectionStatus == "PCC") AccentBlue else AccentGreen
+                            Text(
+                                text = cc.connectionStatus,
+                                color = statusColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = cc.band?.let { "Band $it" } ?: "-",
+                                color = TextPrimary,
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                text = cc.bandwidthKhz?.let { "${it / 1000} MHz" } ?: "-",
+                                color = TextSecondary,
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                text = cc.dlModulation,
+                                color = AccentYellow,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
             }
         }
     }
