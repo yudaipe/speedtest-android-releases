@@ -435,6 +435,27 @@ private fun HiddenRadioInfoCard(
                     Text("再取得", color = AccentBlue, fontSize = 11.sp)
                 }
             } else {
+                Surface(
+                    color = Color(0xFF121212),
+                    shape = MaterialTheme.shapes.medium,
+                    tonalElevation = 0.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text(
+                            text = "QAM",
+                            color = TextSecondary,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = "取得不可（機種非対応）",
+                            color = AccentYellow,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
                 snapshot.componentCarriers.forEachIndexed { index, cc ->
                     if (index > 0) Spacer(modifier = Modifier.height(4.dp))
                     Surface(
@@ -448,29 +469,50 @@ private fun HiddenRadioInfoCard(
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            val statusColor = if (cc.connectionStatus == "PCC") AccentBlue else AccentGreen
-                            Text(
-                                text = cc.connectionStatus,
-                                color = statusColor,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = cc.band?.let { "Band $it" } ?: "-",
-                                color = TextPrimary,
-                                fontSize = 11.sp
-                            )
-                            Text(
-                                text = cc.bandwidthKhz?.let { "${it / 1000} MHz" } ?: "-",
-                                color = TextSecondary,
-                                fontSize = 11.sp
-                            )
-                            Text(
-                                text = cc.dlModulation,
-                                color = AccentYellow,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                val statusColor = if (cc.connectionStatus == "PCC") {
+                                    AccentBlue
+                                } else {
+                                    AccentGreen
+                                }
+                                Text(
+                                    text = "CC${index + 1} ${cc.connectionStatus}",
+                                    color = statusColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = listOf(
+                                        cc.band?.let { "Band $it" } ?: "Band -",
+                                        cc.bandwidthDownlinkKhz?.let { "DL ${it / 1000} MHz" } ?: "DL -",
+                                        cc.bandwidthUplinkKhz?.let { "UL ${it / 1000} MHz" } ?: "UL -"
+                                    ).joinToString(" / "),
+                                    color = TextPrimary,
+                                    fontSize = 11.sp
+                                )
+                                Text(
+                                    text = listOf(
+                                        cc.physicalCellId?.let { "PCI $it" } ?: "PCI -",
+                                        cc.downlinkChannelNumber?.let { "EARFCN/NRARFCN $it" } ?: "Ch -"
+                                    ).joinToString(" / "),
+                                    color = TextSecondary,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = listOf(
+                                        cc.networkType ?: "Type -",
+                                        cc.frequencyRange ?: "Range -",
+                                        cc.downlinkFrequencyKhz?.let { "DLFreq ${it / 1000} MHz" } ?: "DLFreq -"
+                                    ).joinToString(" / "),
+                                    color = TextSecondary,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
                         }
                     }
                 }

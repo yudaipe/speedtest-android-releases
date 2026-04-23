@@ -248,46 +248,108 @@ class HiddenRadioCollector(private val context: Context) {
     }
 
     private fun buildCarrierInfo(config: PhysicalChannelConfig): CarrierInfo {
-        val band: Int? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            runCatching {
-                config.band.takeIf { it != PhysicalChannelConfig.BAND_UNKNOWN }
-            }.getOrNull()
-        } else null
-
-        val bandwidthKhz: Int? = runCatching {
-            config.cellBandwidthDownlinkKhz
-        }.getOrNull()
+        val band = resolveBand(config)
+        val bandwidthDownlinkKhz = readInt(config, "getCellBandwidthDownlinkKhz")
+        val bandwidthUplinkKhz = readInt(config, "getCellBandwidthUplinkKhz")
+        val physicalCellId = readInt(config, "getPhysicalCellId")
+        val networkType = readInt(config, "getNetworkType")?.let(::networkTypeLabel)
+        val frequencyRange = readInt(config, "getFrequencyRange")?.let(::frequencyRangeLabel)
+        val downlinkFrequencyKhz = readInt(
+            target = config,
+            primaryMethod = "getDownlinkFrequencyKhz",
+            fallbackMethods = arrayOf("getDownlinkFrequency")
+        )
+        val downlinkChannelNumber = readInt(config, "getDownlinkChannelNumber")
 
         val connectionStatus: String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            when (runCatching { config.connectionStatus }.getOrDefault(PhysicalChannelConfig.CONNECTION_UNKNOWN)) {
+            when (
+                runCatching { config.connectionStatus }
+                    .getOrDefault(PhysicalChannelConfig.CONNECTION_UNKNOWN)
+            ) {
                 PhysicalChannelConfig.CONNECTION_PRIMARY_SERVING -> "PCC"
                 PhysicalChannelConfig.CONNECTION_SECONDARY_SERVING -> "SCC"
                 else -> "UNKNOWN"
             }
         } else "UNKNOWN"
 
-        val dlModulation: String = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                val method = PhysicalChannelConfig::class.java.getDeclaredMethod("getDownlinkModulation")
-                method.isAccessible = true
-                when (method.invoke(config) as? Int) {
-                    1 -> "QPSK"
-                    2 -> "16QAM"
-                    3 -> "64QAM"
-                    4 -> "256QAM"
-                    else -> "-"
-                }
-            } catch (_: Exception) {
-                "-"
-            }
-        } else "-"
-
         return CarrierInfo(
             band = band,
-            bandwidthKhz = bandwidthKhz,
+            bandwidthDownlinkKhz = bandwidthDownlinkKhz,
+            bandwidthUplinkKhz = bandwidthUplinkKhz,
+            physicalCellId = physicalCellId,
+            networkType = networkType,
+            frequencyRange = frequencyRange,
             connectionStatus = connectionStatus,
-            dlModulation = dlModulation
+            downlinkFrequencyKhz = downlinkFrequencyKhz,
+            downlinkChannelNumber = downlinkChannelNumber
         )
+    }
+
+    private fun resolveBand(config: PhysicalChannelConfig): Int? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching {
+                config.band.takeIf { it != PhysicalChannelConfig.BAND_UNKNOWN }
+            }.getOrNull() ?: readInt(config, "getNetworkBand")
+        } else {
+            readInt(config, "getNetworkBand")
+        }
+    }
+
+    private fun readInt(
+        target: Any,
+        primaryMethod: String,
+        fallbackMethods: Array<String> = emptyArray()
+    ): Int? {
+        return (arrayOf(primaryMethod) + fallbackMethods)
+            .firstNotNullOfOrNull { methodName ->
+                runCatching {
+                    val method = runCatching {
+                        target.javaClass.getMethod(methodName)
+                    }.getOrElse {
+                        target.javaClass.getDeclaredMethod(methodName).apply {
+                            isAccessible = true
+                        }
+                    }
+                    (method.invoke(target) as? Int)
+                }.getOrNull()
+            }
+    }
+
+    private fun networkTypeLabel(value: Int): String {
+        val name = when (value) {
+            TelephonyManager.NETWORK_TYPE_GPRS -> "GPRS"
+            TelephonyManager.NETWORK_TYPE_EDGE -> "EDGE"
+            TelephonyManager.NETWORK_TYPE_UMTS -> "UMTS"
+            TelephonyManager.NETWORK_TYPE_CDMA -> "CDMA"
+            TelephonyManager.NETWORK_TYPE_EVDO_0 -> "EVDO_0"
+            TelephonyManager.NETWORK_TYPE_EVDO_A -> "EVDO_A"
+            TelephonyManager.NETWORK_TYPE_1xRTT -> "1xRTT"
+            TelephonyManager.NETWORK_TYPE_HSDPA -> "HSDPA"
+            TelephonyManager.NETWORK_TYPE_HSUPA -> "HSUPA"
+            TelephonyManager.NETWORK_TYPE_HSPA -> "HSPA"
+            TelephonyManager.NETWORK_TYPE_IDEN -> "IDEN"
+            TelephonyManager.NETWORK_TYPE_EVDO_B -> "EVDO_B"
+            TelephonyManager.NETWORK_TYPE_LTE -> "LTE"
+            TelephonyManager.NETWORK_TYPE_EHRPD -> "EHRPD"
+            TelephonyManager.NETWORK_TYPE_HSPAP -> "HSPAP"
+            TelephonyManager.NETWORK_TYPE_GSM -> "GSM"
+            TelephonyManager.NETWORK_TYPE_TD_SCDMA -> "TD_SCDMA"
+            TelephonyManager.NETWORK_TYPE_IWLAN -> "IWLAN"
+            TelephonyManager.NETWORK_TYPE_NR -> "NR"
+            else -> "TYPE_$value"
+        }
+        return "$name ($value)"
+    }
+
+    private fun frequencyRangeLabel(value: Int): String {
+        val name = when (value) {
+            0 -> "LOW"
+            1 -> "MID"
+            2 -> "HIGH"
+            3 -> "MMWAVE"
+            else -> "RANGE_$value"
+        }
+        return "$name ($value)"
     }
 
     private companion object {
