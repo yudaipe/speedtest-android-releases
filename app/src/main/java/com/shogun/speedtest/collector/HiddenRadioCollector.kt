@@ -12,10 +12,12 @@ import android.util.Log
 import com.shogun.speedtest.data.CarrierInfo
 import com.shogun.speedtest.data.HiddenRadioSnapshot
 import com.shogun.speedtest.debug.HiddenRadioDebugLog
-import java.util.concurrent.atomic.AtomicReference
+import rikka.shizuku.ShizukuBinderWrapper
+import rikka.shizuku.SystemServiceHelper
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class HiddenRadioCollector(private val context: Context) {
 
@@ -185,19 +187,15 @@ class HiddenRadioCollector(private val context: Context) {
     }
 
     private fun createPrivilegedRegistry(): Any {
-        val getSystemService = Class.forName("rikka.shizuku.SystemServiceHelper")
-            .getMethod("getSystemService", String::class.java)
         val registryBinder = sequenceOf("telephony.registry", "telephony_registry")
             .mapNotNull { serviceName ->
                 runCatching {
-                    getSystemService.invoke(null, serviceName) as? IBinder
+                    SystemServiceHelper.getSystemService(serviceName)
                 }.getOrNull()
             }
             .firstOrNull()
             ?: throw IllegalStateException("telephony registry binder unavailable")
-        val wrappedBinder = Class.forName("rikka.shizuku.ShizukuBinderWrapper")
-            .getConstructor(IBinder::class.java)
-            .newInstance(registryBinder) as IBinder
+        val wrappedBinder: IBinder = ShizukuBinderWrapper(registryBinder)
         val registryStub = Class.forName("com.android.internal.telephony.ITelephonyRegistry\$Stub")
         return registryStub.getMethod("asInterface", IBinder::class.java)
             .invoke(null, wrappedBinder)

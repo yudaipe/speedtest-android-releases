@@ -24,3 +24,6 @@
 -keep class androidx.work.** { *; }
 -keep class * extends androidx.work.Worker { *; }
 -keep class * extends androidx.work.ListenableWorker { *; }
+
+# Shizuku helper classes must retain method names used by the release build.
+-keep class rikka.shizuku.** { *; }
