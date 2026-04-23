@@ -11,6 +11,6 @@ data class HiddenRadioSnapshot(
 data class CarrierInfo(
     val band: Int?,
     val bandwidthKhz: Int?,
-    val connectionStatus: String,
-    val dlModulation: String
+    val connectionStatus: String,  // "PCC"/"SCC"/"UNKNOWN"
+    val dlModulation: String       // "256QAM"/.../ "-"
 )
