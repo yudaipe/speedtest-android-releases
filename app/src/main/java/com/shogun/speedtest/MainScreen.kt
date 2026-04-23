@@ -148,7 +148,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 context.startActivity(
                     Intent(
                         Intent.ACTION_VIEW,
-                        Uri.parse("https://github.com/RikkaApps/Shizuku/releases")
+                        Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api")
                     )
                 )
             },
