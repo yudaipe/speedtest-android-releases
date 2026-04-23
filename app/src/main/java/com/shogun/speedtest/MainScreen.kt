@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.shogun.speedtest.data.SpeedtestResult
+import com.shogun.speedtest.shizuku.ShizukuAccessState
 import com.shogun.speedtest.ui.SettingsActivity
 import kotlinx.coroutines.launch
 import kotlin.math.cos
@@ -58,6 +59,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val updateInfo by viewModel.updateInfo.collectAsState()
     val locationMissing by viewModel.locationPermissionMissing.collectAsState()
     val notificationMissing by viewModel.notificationPermissionMissing.collectAsState()
+    val shizukuState by viewModel.shizukuState.collectAsState()
 
     val animatedGauge by animateFloatAsState(
         targetValue = gaugeValue,
@@ -140,6 +142,22 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         }
 
+        ShizukuStatusCard(
+            state = shizukuState,
+            onInstallClick = {
+                context.startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/RikkaApps/Shizuku/releases")
+                    )
+                )
+            },
+            onGrantClick = { viewModel.requestShizukuPermission() },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+        )
+
         // Speedometer gauge or measuring animation
         if (isMeasuring) {
             MeasuringAnimation(modifier = Modifier.size(220.dp))
@@ -192,6 +210,11 @@ fun MainScreen(viewModel: MainViewModel) {
         // Result metrics (show "--" during measurement)
         val displayResult = if (isMeasuring) null else latestResult
         ResultMetrics(result = displayResult, modifier = Modifier.fillMaxWidth())
+
+        if (shizukuState == ShizukuAccessState.Granted) {
+            Spacer(modifier = Modifier.height(8.dp))
+            HiddenRadioInfoCard(modifier = Modifier.fillMaxWidth())
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -258,6 +281,113 @@ fun MainScreen(viewModel: MainViewModel) {
                 TextButton(onClick = { viewModel.dismissUpdate() }) { Text("後で") }
             }
         )
+    }
+}
+
+@Composable
+private fun ShizukuStatusCard(
+    state: ShizukuAccessState,
+    onInstallClick: () -> Unit,
+    onGrantClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val statusColor = when (state) {
+        ShizukuAccessState.Granted -> AccentGreen
+        ShizukuAccessState.PermissionDenied -> AccentYellow
+        ShizukuAccessState.Unavailable -> AccentOrange
+    }
+    val statusText = when (state) {
+        ShizukuAccessState.Granted -> "接続済み"
+        ShizukuAccessState.PermissionDenied -> "権限待ち"
+        ShizukuAccessState.Unavailable -> "未導入 / 未起動"
+    }
+    val helperText = when (state) {
+        ShizukuAccessState.Granted -> "Wave2 で hidden radio data をこの下へ追加する予定です。"
+        ShizukuAccessState.PermissionDenied -> "Shizuku は見つかりました。権限を許可すると追加情報を有効化できます。"
+        ShizukuAccessState.Unavailable -> "Shizuku が見つからないか、サービスに接続できません。"
+    }
+
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = CardColor)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Shizuku Status",
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = statusText,
+                    color = statusColor,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                text = helperText,
+                color = TextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+            when (state) {
+                ShizukuAccessState.Unavailable -> {
+                    TextButton(onClick = onInstallClick, modifier = Modifier.padding(top = 4.dp)) {
+                        Text("Shizukuをインストール", color = AccentBlue)
+                    }
+                }
+                ShizukuAccessState.PermissionDenied -> {
+                    TextButton(onClick = onGrantClick, modifier = Modifier.padding(top = 4.dp)) {
+                        Text("Shizuku権限を許可", color = AccentBlue)
+                    }
+                }
+                ShizukuAccessState.Granted -> Unit
+            }
+        }
+    }
+}
+
+@Composable
+private fun HiddenRadioInfoCard(modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = CardColor)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Text(
+                text = "Hidden Radio Info",
+                color = TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+                color = Color(0xFF121212),
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 0.dp
+            ) {
+                Text(
+                    text = "Wave2で追加予定",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
     }
 }
 

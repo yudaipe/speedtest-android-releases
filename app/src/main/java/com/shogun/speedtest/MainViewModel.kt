@@ -10,6 +10,8 @@ import androidx.work.WorkManager
 import com.shogun.speedtest.data.SpeedtestDatabase
 import com.shogun.speedtest.data.SpeedtestResult
 import com.shogun.speedtest.settings.SettingsRepository
+import com.shogun.speedtest.shizuku.ShizukuAccessState
+import com.shogun.speedtest.shizuku.ShizukuManager
 import com.shogun.speedtest.update.UpdateChecker
 import com.shogun.speedtest.update.UpdateInfo
 import com.shogun.speedtest.worker.SpeedtestWorker
@@ -24,6 +26,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val dao = SpeedtestDatabase.getInstance(application).speedtestDao()
     private val settingsRepo = SettingsRepository(application)
+    private val shizukuManager = ShizukuManager()
 
     val isMeasuring = MutableStateFlow(false)
     val latestResult = MutableStateFlow<SpeedtestResult?>(null)
@@ -36,6 +39,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _updateInfo = MutableStateFlow<UpdateInfo?>(null)
     val updateInfo: StateFlow<UpdateInfo?> = _updateInfo
+    val shizukuState: StateFlow<ShizukuAccessState> = shizukuManager.state
 
     val deviceName: String get() = settingsRepo.getDeviceName()
 
@@ -70,6 +74,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissUpdate() {
         _updateInfo.value = null
+    }
+
+    fun refreshShizukuState() {
+        shizukuManager.refreshState()
+    }
+
+    fun requestShizukuPermission() {
+        shizukuManager.requestPermission()
     }
 
     fun startMeasurement(context: Context) {
@@ -110,5 +122,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    override fun onCleared() {
+        shizukuManager.dispose()
+        super.onCleared()
     }
 }

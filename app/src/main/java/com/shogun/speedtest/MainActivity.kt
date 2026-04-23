@@ -91,6 +91,7 @@ class MainActivity : ComponentActivity() {
         requestLocationPermissionIfNeeded()
         requestPhoneStatePermissionIfNeeded()
         requestNotificationPermissionIfNeeded()
+        viewModel.refreshShizukuState()
         viewModel.checkForUpdate(this)
         setContent {
             val showBlack by showBlackScreen
@@ -134,6 +135,7 @@ class MainActivity : ComponentActivity() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             showBlackScreen.value = false
         }
+        viewModel.refreshShizukuState()
     }
 
     override fun onPause() {

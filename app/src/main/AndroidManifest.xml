@@ -35,9 +35,17 @@
 
     <application
         android:name=".SpeedtestApp"
-        android:label="Speedtest Monitor"
+        android:label="Speedtest Monitor Beta"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
         android:extractNativeLibs="true">
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <!-- LAUNCHER + USB OTG両対応を1つのactivityにまとめる -->
         <activity

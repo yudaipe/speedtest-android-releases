@@ -12,8 +12,8 @@ android {
         applicationId = "com.shogun.speedtest"
         minSdk = 26
         targetSdk = 34
-        versionCode = 43
-        versionName = "2.5.4"
+        versionCode = 100
+        versionName = "0.1.0-shizuku-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -22,7 +22,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".beta"
+        }
         release {
+            applicationIdSuffix = ".beta"
             isMinifyEnabled = true
             signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
@@ -105,6 +109,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 
     implementation("com.shogun.speedtest:common:1.1.0")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 
     testImplementation("junit:junit:4.13.2")
 }
