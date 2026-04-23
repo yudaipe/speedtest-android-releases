@@ -32,6 +32,9 @@ import com.shogun.speedtest.supabase.SupabaseClient
 import com.shogun.speedtest.supabase.SupabaseFailureKind
 import com.shogun.speedtest.supabase.SupabasePostResult
 import com.shogun.speedtest.WifiSsidProvider
+import com.shogun.speedtest.collector.HiddenRadioCollector
+import com.shogun.speedtest.shizuku.ShizukuAccessState
+import com.shogun.speedtest.shizuku.ShizukuManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -122,6 +125,10 @@ class SpeedtestWorker(
             val deviceMetrics = DeviceMetricsCollector(applicationContext).collect()
             val deviceModel = Build.MODEL
 
+            val hiddenSnapshot = if (ShizukuManager(applicationContext).state.value == ShizukuAccessState.Granted) {
+                try { HiddenRadioCollector(applicationContext).collect() } catch (e: Exception) { null }
+            } else null
+
             val entity = SpeedtestResult(
                 timestamp = System.currentTimeMillis() / 1000,
                 timestampIso = timestampJst,
@@ -173,7 +180,10 @@ class SpeedtestWorker(
                 rsrpVariance = cellularInfo.rsrpVariance,
                 ramUsagePercent = deviceMetrics.ramUsagePercent,
                 cpuUsagePercent = deviceMetrics.cpuUsagePercent,
-                bgAppCount = deviceMetrics.bgAppCount
+                bgAppCount = deviceMetrics.bgAppCount,
+                hiddenRadioCcCount = hiddenSnapshot?.ccCount,
+                hiddenRadioConfigs = hiddenSnapshot?.let { Gson().toJson(it.componentCarriers) },
+                hiddenRadioCollectedAt = hiddenSnapshot?.timestamp,
             )
             db.speedtestDao().insert(entity)
 
@@ -294,7 +304,14 @@ class SpeedtestWorker(
                     "rsrp_std" to result.rsrpStd,
                     "ram_usage_percent" to result.ramUsagePercent,
                     "cpu_usage_percent" to result.cpuUsagePercent,
-                    "bg_app_count" to result.bgAppCount
+                    "bg_app_count" to result.bgAppCount,
+                    "hidden_radio_cc_count" to result.hiddenRadioCcCount,
+                    "hidden_radio_configs" to result.hiddenRadioConfigs,
+                    "hidden_radio_collected_at" to result.hiddenRadioCollectedAt?.let {
+                        java.time.Instant.ofEpochMilli(it)
+                            .atOffset(java.time.ZoneOffset.UTC)
+                            .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                    }
                 )
 
                 when (val postResult = client.postResult(payload)) {
