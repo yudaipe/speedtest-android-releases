@@ -2,7 +2,9 @@ package com.shogun.speedtest.collector
 
 import android.content.Context
 import android.os.Build
+import android.os.IBinder
 import android.telephony.PhysicalChannelConfig
+import android.telephony.SubscriptionManager
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import android.util.Log
@@ -21,10 +23,6 @@ class HiddenRadioCollector(private val context: Context) {
         val sdkInt = Build.VERSION.SDK_INT
         HiddenRadioDebugLog.add("collect_start", "sdk=$sdkInt")
         HiddenRadioDebugLog.add("sdk_version", sdkInt.toString())
-        HiddenRadioDebugLog.add(
-            "privileged_context",
-            "Shizuku permission is granted, but app-side TelephonyManager is still used"
-        )
         val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
         val configs: List<PhysicalChannelConfig> = when {
             sdkInt >= Build.VERSION_CODES.S -> collectViaListener(tm)
@@ -70,6 +68,11 @@ class HiddenRadioCollector(private val context: Context) {
         telephonyManager: TelephonyManager
     ): List<PhysicalChannelConfig> {
         HiddenRadioDebugLog.add("collect_path", "listener sdk=${Build.VERSION.SDK_INT}")
+        collectViaPrivilegedBinder(telephonyManager)?.let { return it }
+        HiddenRadioDebugLog.add(
+            "privileged_context",
+            "binder wrap unavailable; falling back to app-side TelephonyManager"
+        )
         val latch = CountDownLatch(1)
         val executor = Executors.newSingleThreadExecutor()
         val configsRef = AtomicReference<List<PhysicalChannelConfig>>(emptyList())
@@ -108,6 +111,155 @@ class HiddenRadioCollector(private val context: Context) {
             }
             executor.shutdown()
         }
+    }
+
+    private fun collectViaPrivilegedBinder(
+        telephonyManager: TelephonyManager
+    ): List<PhysicalChannelConfig>? {
+        val latch = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+        val configsRef = AtomicReference<List<PhysicalChannelConfig>>(emptyList())
+        val callback = object : TelephonyCallback(), TelephonyCallback.PhysicalChannelConfigListener {
+            override fun onPhysicalChannelConfigChanged(
+                physicalChannelConfigs: List<PhysicalChannelConfig>
+            ) {
+                configsRef.set(physicalChannelConfigs)
+                HiddenRadioDebugLog.add(
+                    "listener_callback",
+                    "privileged configs=${physicalChannelConfigs.size}"
+                )
+                latch.countDown()
+            }
+        }
+        var registry: Any? = null
+        var callbackBinder: Any? = null
+
+        return try {
+            HiddenRadioDebugLog.add("binder_wrap", "attempting privileged telephony.registry wrap")
+            registry = createPrivilegedRegistry()
+            initializeTelephonyCallback(callback, executor)
+            callbackBinder = getTelephonyCallbackBinder(callback)
+            invokeRegistryListen(
+                registry = registry,
+                telephonyManager = telephonyManager,
+                callbackBinder = callbackBinder,
+                events = intArrayOf(EVENT_PHYSICAL_CHANNEL_CONFIG_CHANGED),
+                notifyNow = true
+            )
+            HiddenRadioDebugLog.add("binder_wrap", "privileged binder in use")
+            HiddenRadioDebugLog.add("privileged_context", "privileged binder in use")
+            val received = latch.await(LISTENER_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            if (!received) {
+                HiddenRadioDebugLog.add(
+                    "empty_result",
+                    "sdk=${Build.VERSION.SDK_INT} privileged_listener_timeout=${LISTENER_TIMEOUT_MS}ms"
+                )
+            }
+            configsRef.get()
+        } catch (e: SecurityException) {
+            logFailure("binder_wrap_fail", Build.VERSION.SDK_INT, e)
+            null
+        } catch (e: Exception) {
+            logFailure("binder_wrap_fail", Build.VERSION.SDK_INT, e)
+            null
+        } finally {
+            runCatching {
+                if (registry != null && callbackBinder != null) {
+                    invokeRegistryListen(
+                        registry = registry,
+                        telephonyManager = telephonyManager,
+                        callbackBinder = callbackBinder,
+                        events = intArrayOf(),
+                        notifyNow = false
+                    )
+                }
+            }.onFailure {
+                HiddenRadioDebugLog.add(
+                    "binder_unwrap_fail",
+                    "${it.javaClass.simpleName}: ${it.message ?: "unknown"}"
+                )
+            }
+            executor.shutdown()
+        }
+    }
+
+    private fun createPrivilegedRegistry(): Any {
+        val getSystemService = Class.forName("rikka.shizuku.SystemServiceHelper")
+            .getMethod("getSystemService", String::class.java)
+        val registryBinder = sequenceOf("telephony.registry", "telephony_registry")
+            .mapNotNull { serviceName ->
+                runCatching {
+                    getSystemService.invoke(null, serviceName) as? IBinder
+                }.getOrNull()
+            }
+            .firstOrNull()
+            ?: throw IllegalStateException("telephony registry binder unavailable")
+        val wrappedBinder = Class.forName("rikka.shizuku.ShizukuBinderWrapper")
+            .getConstructor(IBinder::class.java)
+            .newInstance(registryBinder) as IBinder
+        val registryStub = Class.forName("com.android.internal.telephony.ITelephonyRegistry\$Stub")
+        return registryStub.getMethod("asInterface", IBinder::class.java)
+            .invoke(null, wrappedBinder)
+            ?: throw IllegalStateException("ITelephonyRegistry unavailable")
+    }
+
+    private fun initializeTelephonyCallback(
+        callback: TelephonyCallback,
+        executor: java.util.concurrent.Executor
+    ) {
+        val init = TelephonyCallback::class.java.getDeclaredMethod(
+            "init",
+            java.util.concurrent.Executor::class.java
+        )
+        init.isAccessible = true
+        init.invoke(callback, executor)
+    }
+
+    private fun getTelephonyCallbackBinder(callback: TelephonyCallback): Any {
+        val field = TelephonyCallback::class.java.getDeclaredField("callback")
+        field.isAccessible = true
+        return field.get(callback)
+            ?: throw IllegalStateException("TelephonyCallback callback binder missing")
+    }
+
+    private fun invokeRegistryListen(
+        registry: Any,
+        telephonyManager: TelephonyManager,
+        callbackBinder: Any,
+        events: IntArray,
+        notifyNow: Boolean
+    ) {
+        val featureId = context.attributionTag ?: ""
+        val subId = telephonyManager.subscriptionId
+            .takeIf { it != SubscriptionManager.INVALID_SUBSCRIPTION_ID }
+            ?: SubscriptionManager.getDefaultSubscriptionId()
+        val method = registry.javaClass.methods.firstOrNull { candidate ->
+            candidate.name == "listenWithEventList"
+        } ?: throw NoSuchMethodException("listenWithEventList")
+        val args = when (method.parameterTypes.size) {
+            6 -> arrayOf(
+                subId,
+                context.packageName,
+                featureId,
+                callbackBinder,
+                events,
+                notifyNow
+            )
+            8 -> arrayOf(
+                false,
+                false,
+                subId,
+                context.packageName,
+                featureId,
+                callbackBinder,
+                events,
+                notifyNow
+            )
+            else -> throw IllegalStateException(
+                "Unsupported listenWithEventList arity=${method.parameterTypes.size}"
+            )
+        }
+        method.invoke(registry, *args)
     }
 
     private fun logFailure(reason: String, sdkInt: Int, throwable: Exception) {
@@ -169,5 +321,6 @@ class HiddenRadioCollector(private val context: Context) {
     private companion object {
         const val TAG = "HiddenRadioCollector"
         const val LISTENER_TIMEOUT_MS = 1500L
+        const val EVENT_PHYSICAL_CHANNEL_CONFIG_CHANGED = 33
     }
 }
