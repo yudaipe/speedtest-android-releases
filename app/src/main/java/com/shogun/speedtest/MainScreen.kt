@@ -11,7 +11,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -69,6 +73,8 @@ fun MainScreen(viewModel: MainViewModel) {
         animationSpec = tween(durationMillis = 400),
         label = "gauge"
     )
+
+    val pagerState = rememberPagerState(pageCount = { 2 })
 
     Column(
         modifier = Modifier
@@ -145,22 +151,6 @@ fun MainScreen(viewModel: MainViewModel) {
             }
         }
 
-        ShizukuStatusCard(
-            state = shizukuState,
-            onInstallClick = {
-                context.startActivity(
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse("https://github.com/thedjchi/Shizuku/releases/latest")
-                    )
-                )
-            },
-            onGrantClick = { viewModel.requestShizukuPermission() },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp)
-        )
-
         // Speedometer gauge or measuring animation
         if (isMeasuring) {
             MeasuringAnimation(modifier = Modifier.size(220.dp))
@@ -214,20 +204,9 @@ fun MainScreen(viewModel: MainViewModel) {
         val displayResult = if (isMeasuring) null else latestResult
         ResultMetrics(result = displayResult, modifier = Modifier.fillMaxWidth())
 
-        if (shizukuState == ShizukuAccessState.Granted) {
-            Spacer(modifier = Modifier.height(8.dp))
-            HiddenRadioInfoCard(
-                snapshot = hiddenRadio,
-                onRefresh = { viewModel.refreshHiddenRadio() },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            HiddenRadioDebugPanel(modifier = Modifier.fillMaxWidth())
-        }
-
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Manual run button
+        // Manual measurement button - always visible above tabs
         Button(
             onClick = { viewModel.startMeasurement(context) },
             enabled = !isMeasuring,
@@ -244,21 +223,34 @@ fun MainScreen(viewModel: MainViewModel) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // History list
-        if (history.isNotEmpty()) {
-            Text(
-                text = "計測履歴",
-                color = TextSecondary,
-                fontSize = 12.sp,
-                modifier = Modifier.fillMaxWidth()
+        // Tab row
+        TabRow(
+            selectedTabIndex = pagerState.currentPage,
+            containerColor = CardColor,
+            contentColor = AccentBlue,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Tab(
+                selected = pagerState.currentPage == 0,
+                onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+                text = { Text("計測履歴", fontSize = 13.sp) }
             )
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                items(history) { result ->
-                    HistoryCard(result = result)
-                }
+            Tab(
+                selected = pagerState.currentPage == 1,
+                onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
+                text = { Text("Hidden Radio Info", fontSize = 13.sp) }
+            )
+        }
+
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) { page ->
+            when (page) {
+                0 -> MeasurementHistoryTab(history)
+                1 -> HiddenRadioTab(shizukuState, hiddenRadio, viewModel)
             }
         }
     }
@@ -294,74 +286,59 @@ fun MainScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun ShizukuStatusCard(
-    state: ShizukuAccessState,
-    onInstallClick: () -> Unit,
-    onGrantClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val statusColor = when (state) {
-        ShizukuAccessState.Granted -> AccentGreen
-        ShizukuAccessState.PermissionDenied -> AccentYellow
-        ShizukuAccessState.Unavailable -> AccentOrange
+private fun MeasurementHistoryTab(history: List<SpeedtestResult>) {
+    if (history.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("計測履歴なし", color = TextSecondary, fontSize = 13.sp)
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            items(history) { result ->
+                HistoryCard(result = result)
+            }
+        }
     }
-    val statusText = when (state) {
-        ShizukuAccessState.Granted -> "接続済み"
-        ShizukuAccessState.PermissionDenied -> "権限待ち"
-        ShizukuAccessState.Unavailable -> "未導入 / 未起動"
-    }
-    val helperText = when (state) {
-        ShizukuAccessState.Granted -> "Hidden Radio Info の取得中。データが取得できない場合は端末非対応の可能性があります。"
-        ShizukuAccessState.PermissionDenied -> "Shizuku は見つかりました。永続化対応版(thedjchi fork)で権限を許可すると追加情報を有効化できます。"
-        ShizukuAccessState.Unavailable -> "Shizuku が見つからないか、サービスに接続できません。永続化対応版(thedjchi fork)の導入を推奨します。"
-    }
+}
 
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = CardColor)
-    ) {
+@Composable
+private fun HiddenRadioTab(
+    shizukuState: ShizukuAccessState,
+    hiddenRadio: HiddenRadioSnapshot?,
+    viewModel: MainViewModel
+) {
+    if (shizukuState != ShizukuAccessState.Granted) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Shizuku未接続\n設定画面から接続状態を確認してください",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+    } else {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Shizuku Status",
-                    color = TextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = statusText,
-                    color = statusColor,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            Text(
-                text = helperText,
-                color = TextSecondary,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(top = 6.dp)
+            HiddenRadioInfoCard(
+                snapshot = hiddenRadio,
+                onRefresh = { viewModel.refreshHiddenRadio() },
+                modifier = Modifier.fillMaxWidth()
             )
-            when (state) {
-                ShizukuAccessState.Unavailable -> {
-                    TextButton(onClick = onInstallClick, modifier = Modifier.padding(top = 4.dp)) {
-                        Text("Shizukuをインストール", color = AccentBlue)
-                    }
-                }
-                ShizukuAccessState.PermissionDenied -> {
-                    TextButton(onClick = onGrantClick, modifier = Modifier.padding(top = 4.dp)) {
-                        Text("Shizuku権限を許可", color = AccentBlue)
-                    }
-                }
-                ShizukuAccessState.Granted -> Unit
-            }
+            HiddenRadioDebugPanel(modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -435,27 +412,6 @@ private fun HiddenRadioInfoCard(
                     Text("再取得", color = AccentBlue, fontSize = 11.sp)
                 }
             } else {
-                Surface(
-                    color = Color(0xFF121212),
-                    shape = MaterialTheme.shapes.medium,
-                    tonalElevation = 0.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                        Text(
-                            text = "QAM",
-                            color = TextSecondary,
-                            fontSize = 10.sp
-                        )
-                        Text(
-                            text = "取得不可（機種非対応）",
-                            color = AccentYellow,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
                 snapshot.componentCarriers.forEachIndexed { index, cc ->
                     if (index > 0) Spacer(modifier = Modifier.height(4.dp))
                     Surface(
@@ -473,7 +429,7 @@ private fun HiddenRadioInfoCard(
                                 modifier = Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
-                                val statusColor = if (cc.connectionStatus == "PCC") {
+                                val statusColor = if (cc.connectionStatus.startsWith("PCC")) {
                                     AccentBlue
                                 } else {
                                     AccentGreen
@@ -486,17 +442,17 @@ private fun HiddenRadioInfoCard(
                                 )
                                 Text(
                                     text = listOf(
-                                        cc.band?.let { "Band $it" } ?: "Band -",
-                                        cc.bandwidthDownlinkKhz?.let { "DL ${it / 1000} MHz" } ?: "DL -",
-                                        cc.bandwidthUplinkKhz?.let { "UL ${it / 1000} MHz" } ?: "UL -"
+                                        cc.band?.let { "Band $it" } ?: "Band −",
+                                        cc.bandwidthDownlinkKhz?.let { "DL ${it / 1000} MHz" } ?: "DL −",
+                                        cc.bandwidthUplinkKhz?.let { "UL ${it / 1000} MHz" } ?: "UL −"
                                     ).joinToString(" / "),
                                     color = TextPrimary,
                                     fontSize = 11.sp
                                 )
                                 Text(
                                     text = listOf(
-                                        cc.physicalCellId?.let { "PCI $it" } ?: "PCI -",
-                                        cc.downlinkChannelNumber?.let { "EARFCN/NRARFCN $it" } ?: "Ch -"
+                                        cc.physicalCellId?.let { "PCI $it" } ?: "PCI −",
+                                        cc.downlinkChannelNumber?.let { "EARFCN/NRARFCN $it" } ?: "Ch −"
                                     ).joinToString(" / "),
                                     color = TextSecondary,
                                     fontSize = 10.sp,
@@ -504,9 +460,9 @@ private fun HiddenRadioInfoCard(
                                 )
                                 Text(
                                     text = listOf(
-                                        cc.networkType ?: "Type -",
-                                        cc.frequencyRange ?: "Range -",
-                                        cc.downlinkFrequencyKhz?.let { "DLFreq ${it / 1000} MHz" } ?: "DLFreq -"
+                                        cc.networkType ?: "Type −",
+                                        cc.frequencyRange ?: "Range −",
+                                        cc.downlinkFrequencyKhz?.let { "DLFreq ${it / 1000} MHz" } ?: "DLFreq −"
                                     ).joinToString(" / "),
                                     color = TextSecondary,
                                     fontSize = 10.sp,

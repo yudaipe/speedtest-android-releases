@@ -152,14 +152,11 @@ class HiddenRadioCollector(private val context: Context) {
 
     private fun connectionStatusLabel(value: Int?): String {
         return when (value) {
-            1 -> "PRIMARY"
-            2 -> "SECONDARY"
-            3 -> "UNKNOWN"
+            1 -> "PCC"
+            2 -> "SCC"
             4 -> "ACTIVE"
-            else -> "UNKNOWN"
-        }.let { label ->
-            if (value == null) label else "$label ($value)"
-        }.replace("PRIMARY", "PCC").replace("SECONDARY", "SCC")
+            else -> "−"
+        }
     }
 
     private fun networkTypeLabel(value: Int): String {

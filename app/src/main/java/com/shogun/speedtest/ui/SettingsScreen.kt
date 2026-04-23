@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.shogun.speedtest.data.SpeedtestResult
+import com.shogun.speedtest.shizuku.ShizukuAccessState
 import com.shogun.speedtest.update.UpdateChecker
 import com.shogun.speedtest.update.UpdateDownloader
 import com.shogun.speedtest.update.UpdateInfo
@@ -45,6 +46,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel) {
     val state by viewModel.uiState.collectAsState()
+    val shizukuState by viewModel.shizukuState.collectAsState()
     val context = LocalContext.current
     val writePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -94,6 +96,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         Divider(modifier = Modifier.padding(vertical = 16.dp))
         Text("ステータス", style = MaterialTheme.typography.titleMedium)
 
+        ShizukuStatusRow(shizukuState)
         BatteryOptimizationStatus()
         LastMeasurementCard(state.lastResult)
         SyncStatusCard(state.unsyncedCount)
@@ -216,6 +219,19 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         ) {
             Text(if (isChecking) "確認中..." else "アップデート確認")
         }
+    }
+}
+
+@Composable
+fun ShizukuStatusRow(state: ShizukuAccessState) {
+    val (label, color) = when (state) {
+        ShizukuAccessState.Granted -> "接続済み" to Color.Green
+        ShizukuAccessState.PermissionDenied -> "権限待ち" to Color.Yellow
+        ShizukuAccessState.Unavailable -> "未接続" to Color.Gray
+    }
+    Row {
+        Text("Shizuku: ", style = MaterialTheme.typography.bodySmall)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = color)
     }
 }
 

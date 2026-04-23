@@ -7,6 +7,8 @@ import com.shogun.speedtest.data.CsvExporter
 import com.shogun.speedtest.data.SpeedtestDatabase
 import com.shogun.speedtest.data.SpeedtestResult
 import com.shogun.speedtest.settings.SettingsRepository
+import com.shogun.speedtest.shizuku.ShizukuAccessState
+import com.shogun.speedtest.shizuku.ShizukuManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +30,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private val settings = SettingsRepository(application)
     private val db = SpeedtestDatabase.getInstance(application)
+    private val shizukuManager = ShizukuManager(application)
+
+    val shizukuState: StateFlow<ShizukuAccessState> = shizukuManager.state
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
@@ -94,6 +99,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun clearExportResult() {
         _uiState.value = _uiState.value.copy(exportResult = null)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        shizukuManager.dispose()
     }
 
     private fun refreshDbState() {
