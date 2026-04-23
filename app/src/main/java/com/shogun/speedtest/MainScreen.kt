@@ -148,7 +148,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 context.startActivity(
                     Intent(
                         Intent.ACTION_VIEW,
-                        Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api")
+                        Uri.parse("https://github.com/thedjchi/Shizuku/releases/latest")
                     )
                 )
             },
@@ -303,8 +303,8 @@ private fun ShizukuStatusCard(
     }
     val helperText = when (state) {
         ShizukuAccessState.Granted -> "Wave2 で hidden radio data をこの下へ追加する予定です。"
-        ShizukuAccessState.PermissionDenied -> "Shizuku は見つかりました。権限を許可すると追加情報を有効化できます。"
-        ShizukuAccessState.Unavailable -> "Shizuku が見つからないか、サービスに接続できません。"
+        ShizukuAccessState.PermissionDenied -> "Shizuku は見つかりました。永続化対応版(thedjchi fork)で権限を許可すると追加情報を有効化できます。"
+        ShizukuAccessState.Unavailable -> "Shizuku が見つからないか、サービスに接続できません。永続化対応版(thedjchi fork)の導入を推奨します。"
     }
 
     Card(
