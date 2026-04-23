@@ -1,8 +1,8 @@
 package com.shogun.speedtest.debug
 
+import android.telephony.PhysicalChannelConfig
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import android.telephony.PhysicalChannelConfig
 
 data class DebugLogEntry(
     val timestamp: Long,
@@ -74,6 +74,10 @@ object HiddenRadioDebugLog {
                 }
             }.joinToString(separator = "\n\n")
         }
+    }
+
+    fun updateRawDump(rawDump: String) {
+        _lastRawDump.value = rawDump
     }
 
     fun stacktrace(throwable: Throwable, maxLines: Int = 5): String {
