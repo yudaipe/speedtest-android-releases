@@ -2,6 +2,7 @@ package com.shogun.speedtest.collector
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import android.telephony.PhysicalChannelConfig
 import android.telephony.TelephonyManager
 import com.shogun.speedtest.data.CarrierInfo
@@ -15,12 +16,16 @@ class HiddenRadioCollector(private val context: Context) {
         val configs: List<PhysicalChannelConfig> = try {
             val method = TelephonyManager::class.java.getDeclaredMethod("getPhysicalChannelConfigs")
             method.isAccessible = true
-            (method.invoke(tm) as? List<PhysicalChannelConfig>) ?: emptyList()
-        } catch (_: Exception) {
+            ((method.invoke(tm) as? List<PhysicalChannelConfig>) ?: emptyList()).also {
+                Log.d(TAG, "getPhysicalChannelConfigs succeeded size=${it.size}")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "getPhysicalChannelConfigs failed; Shizuku permission alone does not elevate this app process", e)
             emptyList()
         }
 
         val carriers = configs.map { config -> buildCarrierInfo(config) }
+        Log.d(TAG, "collect mapped carrierCount=${carriers.size}")
         return HiddenRadioSnapshot(componentCarriers = carriers)
     }
 
@@ -65,5 +70,9 @@ class HiddenRadioCollector(private val context: Context) {
             connectionStatus = connectionStatus,
             dlModulation = dlModulation
         )
+    }
+
+    private companion object {
+        const val TAG = "HiddenRadioCollector"
     }
 }

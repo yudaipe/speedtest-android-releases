@@ -308,7 +308,7 @@ private fun ShizukuStatusCard(
         ShizukuAccessState.Unavailable -> "未導入 / 未起動"
     }
     val helperText = when (state) {
-        ShizukuAccessState.Granted -> "Wave2 で hidden radio data をこの下へ追加する予定です。"
+        ShizukuAccessState.Granted -> "Hidden Radio Info の取得中。データが取得できない場合は端末非対応の可能性があります。"
         ShizukuAccessState.PermissionDenied -> "Shizuku は見つかりました。永続化対応版(thedjchi fork)で権限を許可すると追加情報を有効化できます。"
         ShizukuAccessState.Unavailable -> "Shizuku が見つからないか、サービスに接続できません。永続化対応版(thedjchi fork)の導入を推奨します。"
     }
@@ -399,7 +399,7 @@ private fun HiddenRadioInfoCard(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            if (snapshot == null || snapshot.componentCarriers.isEmpty()) {
+            if (snapshot == null) {
                 Surface(
                     color = Color(0xFF121212),
                     shape = MaterialTheme.shapes.medium,
@@ -407,6 +407,22 @@ private fun HiddenRadioInfoCard(
                 ) {
                     Text(
                         text = "データ取得中...",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+                TextButton(onClick = onRefresh, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("再取得", color = AccentBlue, fontSize = 11.sp)
+                }
+            } else if (snapshot.componentCarriers.isEmpty()) {
+                Surface(
+                    color = Color(0xFF121212),
+                    shape = MaterialTheme.shapes.medium,
+                    tonalElevation = 0.dp
+                ) {
+                    Text(
+                        text = "取得失敗または利用不可（端末非対応の可能性）",
                         color = TextSecondary,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(12.dp)
