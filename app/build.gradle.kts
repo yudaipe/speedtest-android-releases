@@ -12,8 +12,8 @@ android {
         applicationId = "com.shogun.speedtest"
         minSdk = 26
         targetSdk = 34
-        versionCode = 401
-        versionName = "0.4.1-shizuku-beta"
+        versionCode = 44
+        versionName = "2.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -23,10 +23,8 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".beta"
         }
         release {
-            applicationIdSuffix = ".beta"
             isMinifyEnabled = true
             signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
