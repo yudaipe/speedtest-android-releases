@@ -34,7 +34,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.shogun.speedtest.ui.HiddenRadioDebugPanel
 import com.shogun.speedtest.data.HiddenRadioSnapshot
 import com.shogun.speedtest.data.SpeedtestResult
 import com.shogun.speedtest.shizuku.ShizukuAccessState
@@ -338,7 +337,6 @@ private fun HiddenRadioTab(
                 onRefresh = { viewModel.refreshHiddenRadio() },
                 modifier = Modifier.fillMaxWidth()
             )
-            HiddenRadioDebugPanel(modifier = Modifier.fillMaxWidth())
         }
     }
 }
