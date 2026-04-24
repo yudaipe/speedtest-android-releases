@@ -125,7 +125,10 @@ class SpeedtestWorker(
             val deviceMetrics = DeviceMetricsCollector(applicationContext).collect()
             val deviceModel = Build.MODEL
 
-            val hiddenSnapshot = if (ShizukuManager(applicationContext).state.value == ShizukuAccessState.Granted) {
+            val shizukuManager = ShizukuManager(applicationContext)
+            val shizukuActive = shizukuManager.state.value == ShizukuAccessState.Granted
+
+            val hiddenSnapshot = if (shizukuActive) {
                 try { HiddenRadioCollector(applicationContext).collect() } catch (e: Exception) { null }
             } else null
 
@@ -189,6 +192,7 @@ class SpeedtestWorker(
                 isNsa = false,
                 radioAccessConfig = cellularInfo.radioAccessConfig,
                 lteBandwidthSummary = hiddenSnapshot?.lteBandwidthSummary,
+                shizukuActive = shizukuActive,
             )
             db.speedtestDao().insert(entity)
 
@@ -321,7 +325,8 @@ class SpeedtestWorker(
                     "nr_cc_count" to result.nrCcCount,
                     "is_nsa" to result.isNsa,
                     "radio_access_config" to result.radioAccessConfig,
-                    "lte_bandwidth_summary" to result.lteBandwidthSummary
+                    "lte_bandwidth_summary" to result.lteBandwidthSummary,
+                    "shizuku_active" to result.shizukuActive
                 )
 
                 when (val postResult = client.postResult(payload)) {
