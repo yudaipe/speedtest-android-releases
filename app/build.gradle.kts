@@ -12,8 +12,8 @@ android {
         applicationId = "com.shogun.speedtest"
         minSdk = 26
         targetSdk = 34
-        versionCode = 301
-        versionName = "0.3.1-shizuku-beta"
+        versionCode = 400
+        versionName = "0.4.0-shizuku-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
