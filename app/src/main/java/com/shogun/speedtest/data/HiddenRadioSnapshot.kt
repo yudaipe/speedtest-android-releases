@@ -12,6 +12,16 @@ data class HiddenRadioSnapshot(
                 carrier.connectionStatus in setOf("PCC", "SCC", "ACTIVE")
         }
     val nrCcCount: Int? get() = null
+    val lteBandwidthSummary: String?
+        get() {
+            val bws = componentCarriers
+                .filter { carrier ->
+                    carrier.networkType?.startsWith("LTE") == true &&
+                        carrier.connectionStatus in setOf("PCC", "SCC", "ACTIVE")
+                }
+                .mapNotNull { carrier -> carrier.bandwidthDownlinkKhz?.let { it / 1000 } }
+            return if (bws.isEmpty()) null else "(${bws.joinToString("+")})"
+        }
 }
 
 data class CarrierInfo(

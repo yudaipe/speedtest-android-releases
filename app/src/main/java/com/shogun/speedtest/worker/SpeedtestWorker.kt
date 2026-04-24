@@ -188,6 +188,7 @@ class SpeedtestWorker(
                 nrCcCount = hiddenSnapshot?.nrCcCount,
                 isNsa = false,
                 radioAccessConfig = cellularInfo.radioAccessConfig,
+                lteBandwidthSummary = hiddenSnapshot?.lteBandwidthSummary,
             )
             db.speedtestDao().insert(entity)
 
@@ -319,7 +320,8 @@ class SpeedtestWorker(
                     "lte_cc_count" to result.lteCcCount,
                     "nr_cc_count" to result.nrCcCount,
                     "is_nsa" to result.isNsa,
-                    "radio_access_config" to result.radioAccessConfig
+                    "radio_access_config" to result.radioAccessConfig,
+                    "lte_bandwidth_summary" to result.lteBandwidthSummary
                 )
 
                 when (val postResult = client.postResult(payload)) {
