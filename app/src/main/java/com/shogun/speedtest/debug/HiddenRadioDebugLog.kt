@@ -14,6 +14,8 @@ data class DebugLogEntry(
 object HiddenRadioDebugLog {
     private const val MAX_ENTRIES = 50
 
+    var isEnabled: Boolean = false
+
     private val _entries = mutableStateListOf<DebugLogEntry>()
     val entries: List<DebugLogEntry> get() = _entries
 
@@ -24,6 +26,7 @@ object HiddenRadioDebugLog {
     val lastException: DebugLogEntry? get() = _lastException.value
 
     fun add(event: String, detail: String, stacktrace: String? = null) {
+        if (!isEnabled) return
         if (_entries.size >= MAX_ENTRIES) {
             _entries.removeAt(0)
         }
@@ -40,6 +43,7 @@ object HiddenRadioDebugLog {
     }
 
     fun updateRawDump(configs: List<PhysicalChannelConfig>) {
+        if (!isEnabled) return
         _lastRawDump.value = if (configs.isEmpty()) {
             "0 configs"
         } else {
@@ -77,7 +81,25 @@ object HiddenRadioDebugLog {
     }
 
     fun updateRawDump(rawDump: String) {
+        if (!isEnabled) return
         _lastRawDump.value = rawDump
+    }
+
+    fun exportText(): String = buildString {
+        appendLine("=== speedtest debug log ===")
+        appendLine("entries: ${_entries.size}")
+        appendLine()
+        _entries.forEach { entry ->
+            val time = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.US)
+                .format(java.util.Date(entry.timestamp))
+            appendLine("[$time] ${entry.event}: ${entry.detail}")
+            entry.stacktrace?.let { appendLine("  $it") }
+        }
+        _lastRawDump.value?.let {
+            appendLine()
+            appendLine("=== last raw dump ===")
+            appendLine(it)
+        }
     }
 
     fun stacktrace(throwable: Throwable, maxLines: Int = 5): String {
