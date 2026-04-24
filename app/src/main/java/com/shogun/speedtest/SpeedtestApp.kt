@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.content.Intent
 import android.os.Build
 import androidx.work.Configuration
+import com.shogun.speedtest.debug.HiddenRadioDebugLog
 import com.shogun.speedtest.monitor.SpeedtestMonitorService
+import com.shogun.speedtest.settings.DebugLogPreferences
 import com.shogun.speedtest.worker.SpeedtestWorker
 import com.shogun.speedtest.worker.WorkScheduler
 
@@ -19,6 +21,7 @@ class SpeedtestApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        HiddenRadioDebugLog.isEnabled = DebugLogPreferences(this).isDebugLogEnabled()
         createNotificationChannel()
         WorkScheduler.schedule(this)
         startForegroundService(Intent(this, SpeedtestMonitorService::class.java))

@@ -2,11 +2,13 @@ package com.shogun.speedtest.ui
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.PowerManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,6 +21,7 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,11 +33,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.shogun.speedtest.data.SpeedtestResult
+import com.shogun.speedtest.shizuku.ShizukuAccessState
 import com.shogun.speedtest.update.UpdateChecker
 import com.shogun.speedtest.update.UpdateDownloader
 import com.shogun.speedtest.update.UpdateInfo
@@ -45,6 +50,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel) {
     val state by viewModel.uiState.collectAsState()
+    val shizukuState by viewModel.shizukuState.collectAsState()
     val context = LocalContext.current
     val writePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -57,6 +63,19 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         LaunchedEffect(msg) {
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
             viewModel.clearExportResult()
+        }
+    }
+
+    // デバッグログ共有インテント発行
+    state.pendingShareUri?.let { uri ->
+        LaunchedEffect(uri) {
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(shareIntent, "ログを共有"))
+            viewModel.clearPendingShareUri()
         }
     }
 
@@ -94,6 +113,7 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         Divider(modifier = Modifier.padding(vertical = 16.dp))
         Text("ステータス", style = MaterialTheme.typography.titleMedium)
 
+        ShizukuStatusRow(shizukuState)
         BatteryOptimizationStatus()
         LastMeasurementCard(state.lastResult)
         SyncStatusCard(state.unsyncedCount)
@@ -106,6 +126,31 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
             modifier = Modifier.padding(top = 8.dp)
         ) {
             Text(if (state.isExporting) "エクスポート中..." else "データエクスポート")
+        }
+
+        Divider(modifier = Modifier.padding(vertical = 16.dp))
+        Text("デバッグログ", style = MaterialTheme.typography.titleMedium)
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("詳細ログ収集", style = MaterialTheme.typography.bodyMedium)
+            Switch(
+                checked = state.debugLogEnabled,
+                onCheckedChange = viewModel::setDebugLogEnabled
+            )
+        }
+
+        Button(
+            onClick = { viewModel.exportDebugLog() },
+            enabled = state.debugLogEnabled,
+            modifier = Modifier.padding(top = 4.dp)
+        ) {
+            Text("ログをエクスポート")
         }
 
         Divider(modifier = Modifier.padding(vertical = 16.dp))
@@ -216,6 +261,19 @@ fun SettingsScreen(viewModel: SettingsViewModel) {
         ) {
             Text(if (isChecking) "確認中..." else "アップデート確認")
         }
+    }
+}
+
+@Composable
+fun ShizukuStatusRow(state: ShizukuAccessState) {
+    val (label, color) = when (state) {
+        ShizukuAccessState.Granted -> "接続済み" to Color.Green
+        ShizukuAccessState.PermissionDenied -> "権限待ち" to Color.Yellow
+        ShizukuAccessState.Unavailable -> "未接続" to Color.Gray
+    }
+    Row {
+        Text("Shizuku: ", style = MaterialTheme.typography.bodySmall)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = color)
     }
 }
 

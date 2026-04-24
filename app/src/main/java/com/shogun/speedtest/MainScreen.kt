@@ -11,7 +11,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,7 +34,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.shogun.speedtest.ui.HiddenRadioDebugPanel
+import com.shogun.speedtest.data.HiddenRadioSnapshot
 import com.shogun.speedtest.data.SpeedtestResult
+import com.shogun.speedtest.shizuku.ShizukuAccessState
 import com.shogun.speedtest.ui.SettingsActivity
 import kotlinx.coroutines.launch
 import kotlin.math.cos
@@ -58,12 +65,16 @@ fun MainScreen(viewModel: MainViewModel) {
     val updateInfo by viewModel.updateInfo.collectAsState()
     val locationMissing by viewModel.locationPermissionMissing.collectAsState()
     val notificationMissing by viewModel.notificationPermissionMissing.collectAsState()
+    val shizukuState by viewModel.shizukuState.collectAsState()
+    val hiddenRadio by viewModel.hiddenRadioFlow.collectAsState()
 
     val animatedGauge by animateFloatAsState(
         targetValue = gaugeValue,
         animationSpec = tween(durationMillis = 400),
         label = "gauge"
     )
+
+    val pagerState = rememberPagerState(pageCount = { 2 })
 
     Column(
         modifier = Modifier
@@ -195,7 +206,7 @@ fun MainScreen(viewModel: MainViewModel) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Manual run button
+        // Manual measurement button - always visible above tabs
         Button(
             onClick = { viewModel.startMeasurement(context) },
             enabled = !isMeasuring,
@@ -212,21 +223,34 @@ fun MainScreen(viewModel: MainViewModel) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // History list
-        if (history.isNotEmpty()) {
-            Text(
-                text = "計測履歴",
-                color = TextSecondary,
-                fontSize = 12.sp,
-                modifier = Modifier.fillMaxWidth()
+        // Tab row
+        TabRow(
+            selectedTabIndex = pagerState.currentPage,
+            containerColor = CardColor,
+            contentColor = AccentBlue,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Tab(
+                selected = pagerState.currentPage == 0,
+                onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+                text = { Text("計測履歴", fontSize = 13.sp) }
             )
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                items(history) { result ->
-                    HistoryCard(result = result)
-                }
+            Tab(
+                selected = pagerState.currentPage == 1,
+                onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
+                text = { Text("Hidden Radio Info", fontSize = 13.sp) }
+            )
+        }
+
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) { page ->
+            when (page) {
+                0 -> MeasurementHistoryTab(history)
+                1 -> HiddenRadioTab(shizukuState, hiddenRadio, viewModel)
             }
         }
     }
@@ -258,6 +282,198 @@ fun MainScreen(viewModel: MainViewModel) {
                 TextButton(onClick = { viewModel.dismissUpdate() }) { Text("後で") }
             }
         )
+    }
+}
+
+@Composable
+private fun MeasurementHistoryTab(history: List<SpeedtestResult>) {
+    if (history.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("計測履歴なし", color = TextSecondary, fontSize = 13.sp)
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            items(history) { result ->
+                HistoryCard(result = result)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HiddenRadioTab(
+    shizukuState: ShizukuAccessState,
+    hiddenRadio: HiddenRadioSnapshot?,
+    viewModel: MainViewModel
+) {
+    if (shizukuState != ShizukuAccessState.Granted) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Shizuku未接続\n設定画面から接続状態を確認してください",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            HiddenRadioInfoCard(
+                snapshot = hiddenRadio,
+                onRefresh = { viewModel.refreshHiddenRadio() },
+                modifier = Modifier.fillMaxWidth()
+            )
+            HiddenRadioDebugPanel(modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun HiddenRadioInfoCard(
+    snapshot: HiddenRadioSnapshot?,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = CardColor)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Hidden Radio Info",
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (snapshot != null && snapshot.isCarrierAggregation) {
+                    Text(
+                        text = "CA (${snapshot.ccCount}CC)",
+                        color = AccentGreen,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            if (snapshot == null) {
+                Surface(
+                    color = Color(0xFF121212),
+                    shape = MaterialTheme.shapes.medium,
+                    tonalElevation = 0.dp
+                ) {
+                    Text(
+                        text = "データ取得中...",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+                TextButton(onClick = onRefresh, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("再取得", color = AccentBlue, fontSize = 11.sp)
+                }
+            } else if (snapshot.componentCarriers.isEmpty()) {
+                Surface(
+                    color = Color(0xFF121212),
+                    shape = MaterialTheme.shapes.medium,
+                    tonalElevation = 0.dp
+                ) {
+                    Text(
+                        text = "取得失敗または利用不可（端末非対応の可能性）",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+                TextButton(onClick = onRefresh, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("再取得", color = AccentBlue, fontSize = 11.sp)
+                }
+            } else {
+                snapshot.componentCarriers.forEachIndexed { index, cc ->
+                    if (index > 0) Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        color = Color(0xFF121212),
+                        shape = MaterialTheme.shapes.medium,
+                        tonalElevation = 0.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                val statusColor = if (cc.connectionStatus.startsWith("PCC")) {
+                                    AccentBlue
+                                } else {
+                                    AccentGreen
+                                }
+                                Text(
+                                    text = "CC${index + 1} ${cc.connectionStatus}",
+                                    color = statusColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = listOf(
+                                        cc.band?.let { "Band $it" } ?: "Band −",
+                                        cc.bandwidthDownlinkKhz?.let { "DL ${it / 1000} MHz" } ?: "DL −",
+                                        cc.bandwidthUplinkKhz?.let { "UL ${it / 1000} MHz" } ?: "UL −"
+                                    ).joinToString(" / "),
+                                    color = TextPrimary,
+                                    fontSize = 11.sp
+                                )
+                                Text(
+                                    text = listOf(
+                                        cc.physicalCellId?.let { "PCI $it" } ?: "PCI −",
+                                        cc.downlinkChannelNumber?.let { "EARFCN/NRARFCN $it" } ?: "Ch −"
+                                    ).joinToString(" / "),
+                                    color = TextSecondary,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = listOf(
+                                        cc.networkType ?: "Type −",
+                                        cc.frequencyRange ?: "Range −",
+                                        cc.downlinkFrequencyKhz?.let { "DLFreq ${it / 1000} MHz" } ?: "DLFreq −"
+                                    ).joinToString(" / "),
+                                    color = TextSecondary,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
