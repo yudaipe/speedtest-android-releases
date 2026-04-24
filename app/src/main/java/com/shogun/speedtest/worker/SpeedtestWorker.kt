@@ -184,6 +184,10 @@ class SpeedtestWorker(
                 hiddenRadioCcCount = hiddenSnapshot?.ccCount,
                 hiddenRadioConfigs = hiddenSnapshot?.let { Gson().toJson(it.componentCarriers) },
                 hiddenRadioCollectedAt = hiddenSnapshot?.timestamp,
+                lteCcCount = hiddenSnapshot?.lteCcCount,
+                nrCcCount = hiddenSnapshot?.nrCcCount,
+                isNsa = false,
+                radioAccessConfig = cellularInfo.radioAccessConfig,
             )
             db.speedtestDao().insert(entity)
 
@@ -311,7 +315,11 @@ class SpeedtestWorker(
                         java.time.Instant.ofEpochMilli(it)
                             .atOffset(java.time.ZoneOffset.UTC)
                             .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-                    }
+                    },
+                    "lte_cc_count" to result.lteCcCount,
+                    "nr_cc_count" to result.nrCcCount,
+                    "is_nsa" to result.isNsa,
+                    "radio_access_config" to result.radioAccessConfig
                 )
 
                 when (val postResult = client.postResult(payload)) {

@@ -54,7 +54,8 @@ data class CellularInfo(
     val handoverCount: Int? = null,
     val endcAvailable: Boolean? = null,
     val rsrpStd: Double? = null,
-    val rsrpVariance: Double? = null
+    val rsrpVariance: Double? = null,
+    val radioAccessConfig: String? = null
 )
 
 private data class RsrpSamplingStats(
@@ -76,6 +77,20 @@ class CellularInfoCollector(private val context: Context) {
             TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_CA,
             TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_LTE_ADVANCED_PRO
         )
+
+        internal fun determineRadioAccessConfig(
+            isCa: String?,
+            nrState: String?,
+            networkType: String?
+        ): String {
+            return when {
+                nrState == "CONNECTED" && isCa == "yes" -> "NSA"
+                nrState == "CONNECTED" && networkType == "NR" -> "SA"
+                isCa == "yes" -> "LTE_CA"
+                networkType?.let { it == "LTE" || it.startsWith("LTE") } == true -> "LTE"
+                else -> "UNKNOWN"
+            }
+        }
 
         internal fun determineIsCa(
             activeTransport: ActiveTransport,
@@ -190,6 +205,11 @@ class CellularInfoCollector(private val context: Context) {
         val rsrpStats = calculateRsrpSamplingStats(collectRsrpSamples(telephonyManager))
         val caBandConfig = getCaBandConfig(telephonyManager)
         val isCa = getIsCa(telephonyManager, activeTransport, currentOverrideNetworkType, caBandConfig)
+        val nrState = getNrState(telephonyManager)
+        val networkType = getNetworkType(telephonyManager)
+        val radioAccessConfig = if (activeTransport == ActiveTransport.CELLULAR) {
+            determineRadioAccessConfig(isCa, nrState, networkType)
+        } else null
         overrideNetworkType = TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NONE
 
         return CellularInfo(
@@ -201,14 +221,14 @@ class CellularInfoCollector(private val context: Context) {
             tac = getTac(telephonyManager),
             earfcn = getEarfcn(telephonyManager),
             bandNumber = getBandNumber(telephonyManager),
-            networkType = getNetworkType(telephonyManager),
+            networkType = networkType,
             carrierName = telephonyManager.networkOperatorName?.takeIf { it.isNotBlank() },
             apn = getApn(),
             isCarrierAggregation = getIsCarrierAggregation(telephonyManager, activeTransport),
             isCa = isCa,
             caBandwidthMhz = getCaBandwidthMhz(telephonyManager),
             caBandConfig = caBandConfig,
-            nrState = getNrState(telephonyManager),
+            nrState = nrState,
             mcc = getMcc(telephonyManager),
             mnc = getMnc(telephonyManager),
             cqi = getCqi(telephonyManager),
@@ -217,7 +237,8 @@ class CellularInfoCollector(private val context: Context) {
             handoverCount = handoverCount,
             endcAvailable = getEndcAvailable(telephonyManager),
             rsrpStd = rsrpStats.stdDb,
-            rsrpVariance = rsrpStats.varianceDb
+            rsrpVariance = rsrpStats.varianceDb,
+            radioAccessConfig = radioAccessConfig
         )
     }
 

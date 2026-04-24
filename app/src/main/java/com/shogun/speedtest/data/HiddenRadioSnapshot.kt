@@ -6,6 +6,12 @@ data class HiddenRadioSnapshot(
 ) {
     val ccCount: Int get() = componentCarriers.size
     val isCarrierAggregation: Boolean get() = ccCount > 1
+    val lteCcCount: Int
+        get() = componentCarriers.count { carrier ->
+            carrier.networkType?.startsWith("LTE") == true &&
+                carrier.connectionStatus in setOf("PCC", "SCC", "ACTIVE")
+        }
+    val nrCcCount: Int? get() = null
 }
 
 data class CarrierInfo(

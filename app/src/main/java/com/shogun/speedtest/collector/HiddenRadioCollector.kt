@@ -77,7 +77,7 @@ class HiddenRadioCollector(private val context: Context) {
 
         return blocks.map { block ->
             ParsedPhysicalChannelConfig(
-                connectionStatus = findInt(block, "mConnectionStatus"),
+                connectionStatus = findField(block, "mConnectionStatus"),
                 bandwidthDownlinkKhz = findInt(block, "mCellBandwidthDownlinkKhz"),
                 bandwidthUplinkKhz = findInt(block, "mCellBandwidthUplinkKhz"),
                 networkType = findInt(block, "mNetworkType"),
@@ -94,7 +94,7 @@ class HiddenRadioCollector(private val context: Context) {
         }
     }
 
-    private fun findInt(block: String, vararg fieldNames: String): Int? {
+    private fun findField(block: String, vararg fieldNames: String): String? {
         return fieldNames.firstNotNullOfOrNull { fieldName ->
             FIELD_REGEX_TEMPLATE
                 .replace("%FIELD%", Regex.escape(fieldName))
@@ -102,7 +102,12 @@ class HiddenRadioCollector(private val context: Context) {
                 .find(block)
                 ?.groupValues
                 ?.getOrNull(1)
-                ?.toIntOrNull()
+        }
+    }
+
+    private fun findInt(block: String, vararg fieldNames: String): Int? {
+        return fieldNames.firstNotNullOfOrNull { fieldName ->
+            findField(block, fieldName)?.toIntOrNull()
         }
     }
 
@@ -150,11 +155,12 @@ class HiddenRadioCollector(private val context: Context) {
         )
     }
 
-    private fun connectionStatusLabel(value: Int?): String {
-        return when (value) {
-            1 -> "PCC"
-            2 -> "SCC"
-            4 -> "ACTIVE"
+    private fun connectionStatusLabel(value: String?): String {
+        if (value == null) return "−"
+        return when {
+            value == "1" || value == "PRIMARY_SERVING" || value.contains("PRIMARY") -> "PCC"
+            value == "2" || value == "SECONDARY_SERVING" || value.contains("SECONDARY") -> "SCC"
+            value == "4" || value == "ACTIVE" -> "ACTIVE"
             else -> "−"
         }
     }
@@ -199,7 +205,7 @@ class HiddenRadioCollector(private val context: Context) {
     private companion object {
         const val TAG = "HiddenRadioCollector"
         val CONFIG_BLOCK_REGEX = Regex("""\{[^{}]+\}""")
-        const val FIELD_REGEX_TEMPLATE = """%FIELD%=(-?\d+)"""
+        const val FIELD_REGEX_TEMPLATE = """%FIELD%=([^, }]+)"""
     }
 
     private data class DumpResult(
@@ -208,7 +214,7 @@ class HiddenRadioCollector(private val context: Context) {
     )
 
     private data class ParsedPhysicalChannelConfig(
-        val connectionStatus: Int?,
+        val connectionStatus: String?,
         val bandwidthDownlinkKhz: Int?,
         val bandwidthUplinkKhz: Int?,
         val networkType: Int?,
