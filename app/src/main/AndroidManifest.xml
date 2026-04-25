@@ -35,7 +35,7 @@
 
     <application
         android:name=".SpeedtestApp"
-        android:label="Speedtest Monitor Beta"
+        android:label="Speedtest Monitor"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
         android:extractNativeLibs="true">
 
