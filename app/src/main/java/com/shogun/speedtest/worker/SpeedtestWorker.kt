@@ -260,6 +260,7 @@ class SpeedtestWorker(
             )
             val unsynced = db.speedtestDao().getUnsynced()
             for (result in unsynced) {
+                val isWifi = result.connectionType == "wifi"
                 val payload: Map<String, Any?> = mapOf(
                     "timestamp" to result.timestampIso,
                     "device_id" to deviceId,
@@ -283,14 +284,14 @@ class SpeedtestWorker(
                     "software_version" to appVersion,
                     "wifi_ssid" to result.wifiSsid,
                     "connection_type" to result.connectionType,
-                    "rsrp_dbm" to result.rsrpDbm,
-                    "rsrq_db" to result.rsrqDb,
-                    "sinr_db" to result.sinrDb,
+                    "rsrp_dbm" to if (isWifi) null else result.rsrpDbm,
+                    "rsrq_db" to if (isWifi) null else result.rsrqDb,
+                    "sinr_db" to if (isWifi) null else result.sinrDb,
                     "rssi_dbm" to result.rssiDbm,
-                    "pci" to result.pci,
+                    "pci" to if (isWifi) null else result.pci,
                     "tac" to result.tac,
                     "earfcn" to result.earfcn,
-                    "band_number" to result.bandNumber,
+                    "band_number" to if (isWifi) null else result.bandNumber,
                     "network_type" to result.networkType,
                     "carrier_name" to result.carrierName,
                     "apn" to result.apn,
@@ -321,11 +322,11 @@ class SpeedtestWorker(
                             .atOffset(java.time.ZoneOffset.UTC)
                             .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)
                     },
-                    "lte_cc_count" to result.lteCcCount,
-                    "nr_cc_count" to result.nrCcCount,
-                    "is_nsa" to result.isNsa,
-                    "radio_access_config" to result.radioAccessConfig,
-                    "lte_bandwidth_summary" to result.lteBandwidthSummary,
+                    "lte_cc_count" to if (isWifi) null else result.lteCcCount,
+                    "nr_cc_count" to if (isWifi) null else result.nrCcCount,
+                    "is_nsa" to if (isWifi) null else result.isNsa,
+                    "radio_access_config" to if (isWifi) null else result.radioAccessConfig,
+                    "lte_bandwidth_summary" to if (isWifi) null else result.lteBandwidthSummary,
                     "shizuku_active" to result.shizukuActive
                 )
 
